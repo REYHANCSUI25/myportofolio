@@ -19,3 +19,15 @@ ChatGPT was also used to assist in overcoming the following technical difficulti
 1. Git Bash wouldn't properly reflect changes I was making in VS Code or the local server.
 2. Folder duplication caused by previous versions of the project from Assignment 1 made it difficult to tell which files I was actually working on.
 3. I had problems with incorrect file paths and folder locations when linking HTML and image files. Some files worked locally while others showed as missing because the paths were pointing to the wrong folder.
+
+### Assignment 2
+
+1. When a user opens `/education/`, the browser sends a GET request. `portofolio/urls.py` is the project's main URL file. It sends everything to `main.urls` using `include()`. `main/urls.py` matches `education/` and sends the request to the `show_education` view. The view calls `Education.objects.all().order_by("-started_at")` to get all the education rows from the database. It puts that data into a context dictionary along with a `name` string. Then `render()` loads `templates/education.html` and fills it in with that context. The `{% for %}` loop prints each education entry, or shows the `{% empty %}` message if there are none. Django sends the finished HTML back to the browser.
+2. If education entries were hardcoded in the template, adding or changing one would mean editing HTML by hand every time. That's slow and easy to get wrong. With a model, the data lives in the database instead. New entries are just new rows, added without touching the template or view code at all. This also keeps the code cleaner. Template changes only affect layout, and data changes only affect the database.
+3. `makemigrations` looks at the current models and writes a migration file describing what changed. It does not touch the database yet. `migrate` then applies that migration to the actual database, creating or changing tables to match. For example, adding the `Education` model needed `makemigrations` to create `0002_education.py`, then `migrate` to actually build that table so `Education.objects.create(...)` has somewhere to save data.
+
+ChatGPT and Google's AI Overview was used for me to learn the following:
+1. Learning how .order_by() controls the order in which records are returned was relevant to displaying the most recent education entry first instead of relying on the database's default ordering.
+2. Learning hoow .filter(...).update(...) can modify an existing row without deleting and recreating it was useful for correcting the description of a UI card after placegolder text had been left in it.
+3. Learning about template inheritance through {% extends %} and {% block %} was relevant to the  base-template refactor, particularly for moving the navbar and footer into a shared template.
+4. Learning that a {% if %} block can be used without an {% else %} was relevant to making the Ongoing badge appear only when an entry is actually ongoing.
