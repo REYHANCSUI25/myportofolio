@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Education - {{ name }}{% endblock %}
+
+{% block content %}
+        <section class="education-section" id="education">
+            <div class="container">
+                <p class="section-kicker">Academic background</p>
+                <h1>Education</h1>
+
+                <div class="education-grid">
+                    {% for education in education_list %}
+                        <article class="education-card">
+                            <span class="education-institution">
+                                {{ education.institution }}
+                            </span>
+                            <h2>{{ education.degree }}</h2>
+                            <p class="education-description">
+                                {{ education.description }}
+                            </p>
+                            <p class="education-period">
+                                {{ education.started_at|date:"Y" }} –
+                                {% if education.is_ongoing %}
+                                    Present
+                                {% else %}
+                                    {{ education.ended_at|date:"Y" }}
+                                {% endif %}
+                            </p>
+                            {% if education.is_ongoing %}
+                                <span class="education-status education-status--ongoing">Ongoing</span>
+                            {% endif %}
+                        </article>
+                    {% empty %}
+                        <p class="empty-state">
+                            No education history has been added yet.
+                        </p>
+                    {% endfor %}
+                </div>
+            </div>
+        </section>
+{% endblock %}
