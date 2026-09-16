@@ -1,12 +1,32 @@
 {% extends "base.html" %}
 
-{% block title %}Education - {{ name }}{% endblock %}
+{% block meta %}
+    <title>Education - {{ name }}</title>
+{% endblock meta %}
 
 {% block content %}
         <section class="education-section" id="education">
             <div class="container">
                 <p class="section-kicker">Academic background</p>
-                <h1>Education</h1>
+                <div class="education-header">
+                    <h1>Education</h1>
+                    <a href="{% url 'main:create_education' %}"
+                       class="button education-add-button">
+                        <span aria-hidden="true">+</span>
+                        Add Education
+                    </a>
+                </div>
+                <form method="get"
+                      action="{% url 'main:show_education' %}"
+                      class="education-search">
+                    <input type="search"
+                           name="institution"
+                           value="{{ institution_query }}"
+                           placeholder="Search by institution"
+                           class="education-search__input"
+                           aria-label="Search by institution">
+                    <button type="submit" class="button">Search</button>
+                </form>
 
                 <div class="education-grid">
                     {% for education in education_list %}
@@ -29,11 +49,18 @@
                             {% if education.is_ongoing %}
                                 <span class="education-status education-status--ongoing">Ongoing</span>
                             {% endif %}
+                            <div class="education-card-actions">
+                                {% include "components/education_delete_modal.html" with education=education %}
+                            </div>
                         </article>
                     {% empty %}
-                        <p class="empty-state">
-                            No education history has been added yet.
-                        </p>
+                        {% if institution_query %}
+                            <p class="empty-state">No education entries match that institution.</p>
+                        {% else %}
+                            <p class="empty-state">
+                                No education history has been added yet.
+                            </p>
+                        {% endif %}
                     {% endfor %}
                 </div>
             </div>
