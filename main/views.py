@@ -24,6 +24,11 @@ def show_experience(request):
     }
     return render(request, "experience.html", context)
 
+def get_experiences_json(request):
+    experiences = Experience.objects.all()
+    experiences_json = serializers.serialize("json", experiences)
+    return HttpResponse(experiences_json, content_type="application/json")
+
 def get_educations_json(request):
     institution_query = request.GET.get("institution", "").strip()
     educations = Education.objects.all().order_by("-started_at")
@@ -66,6 +71,21 @@ def create_education(request):
     }
     return render(request, "education_form.html", context)
 
+
+def update_education(request, education_id):
+    education = get_object_or_404(Education, pk=education_id)
+    form = EducationForm(request.POST or None, instance=education)
+
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Education entry updated successfully!")
+        return redirect("main:show_education")
+
+    context = {
+        "name": "Muhammad Reyhan Attarizky",
+        "form": form,
+    }
+    return render(request, "education_form.html", context)
 
 def delete_education(request, education_id):
     education = get_object_or_404(Education, pk=education_id)
