@@ -5,8 +5,10 @@ from main.views import (
     show_experience,
     show_education,
     create_education,
+    update_education,
     delete_education,
     get_educations_json,
+    get_experiences_json,
 )
 
 app_name = "main"
@@ -18,4 +20,6 @@ urlpatterns = [
     path("education/add/", create_education, name="create_education"),
     path("api/education/", get_educations_json, name="get_educations_json"),
     path("education/<uuid:education_id>/delete/", delete_education, name="delete_education"),
+    path("education/<uuid:education_id>/edit/", update_education, name="update_education"),
+    path("api/experience/", get_experiences_json, name="get_experiences_json"),
 ]

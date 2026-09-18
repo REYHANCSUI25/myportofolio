@@ -50,6 +50,8 @@
                                 <span class="education-status education-status--ongoing">Ongoing</span>
                             {% endif %}
                             <div class="education-card-actions">
+                                <a href="{% url 'main:update_education' education.id %}"
+                                   class="button button-secondary">Edit</a>
                                 {% include "components/education_delete_modal.html" with education=education %}
                             </div>
                         </article>
