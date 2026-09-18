@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 
 {% block meta %}
-    <title>Add Education - {{ name }}</title>
+    <title>{% if form.instance.pk %}Edit Education{% else %}Add Education{% endif %} - {{ name }}</title>
 {% endblock meta %}
 
 {% block content %}
     <section class="education-section">
         <div class="container">
-            <h1>Add New Education</h1>
+            <h1>{% if form.instance.pk %}Edit Education{% else %}Add New Education{% endif %}</h1>
             <form method="post"
-                  action="{% url 'main:create_education' %}"
+                  action="{% if form.instance.pk %}{% url 'main:update_education' form.instance.pk %}{% else %}{% url 'main:create_education' %}{% endif %}"
                   class="education-form">
                 {% csrf_token %}
                 {% for field in form %}
@@ -21,7 +21,9 @@
                         {% endfor %}
                     </div>
                 {% endfor %}
-                <button type="submit" class="button">Add Education</button>
+                <button type="submit" class="button">
+                    {% if form.instance.pk %}Save Changes{% else %}Add Education{% endif %}
+                </button>
                 <a href="{% url 'main:show_education' %}" class="button button-secondary">Cancel</a>
             </form>
         </div>
