@@ -39,5 +39,7 @@ ChatGPT and Google's AI Overview was used for me to learn the following:
 3. When a view function returns portfolio data in JSON format, it starts with model instances from the database, which are Python objects. Those objects cannot be sent directly over HTTP as JSON, so they first go through serialization, converting the model instances into a plain data structure that maps cleanly to JSON syntax. Once serialized, that data is returned as an HttpResponse with content type application/json. Serialization is required because JSON only understands basic data types like strings, numbers, and lists, while a Django model instance carries extra structure, like its Python class and database relationships, that JSON has no way to represent directly.
 
 ChatGPT and Google's AI Overview was used for me to learn the following:
-1. Learning how Django's `ModelForm` can generate a form directly from an existing model, including how to choose which model fields are editable and how Django handles the form's validation.
-2. Learning how to use a `ModelForm` to update an existing database object by retrieving the object first and passing it into the form, instead of creating a new object.
+1. Reusing one form and one template for both creating and updating a record, checking whether the form's instance already has a primary key to tell which mode it's in, instead of building two separate templates for the same fields.
+2. Prefilling a form with an existing database row by passing instance to the form class, so editing something loads its current values instead of showing a blank form.
+3. Creating a feature branch, doing the work only on that branch, then merging it back with an explicit merge commit instead of a fast forward, so the branch's shape stays visible in the history afterward.
+4. Undoing commits with git reset while keeping the actual file changes intact, rather than losing the work outright.
