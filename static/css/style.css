@@ -60,6 +60,11 @@ h1, .brand {
     font-size: 0.95rem;
 }
 
+.nav-user {
+    color: var(--text-muted);
+    font-size: 0.95rem;
+}
+
 .hero {
     padding: 4.5rem 0 5rem;
 }
@@ -358,6 +363,28 @@ h1, .brand {
     line-height: 1;
 }
 
+.star-form {
+    display: inline-block;
+    margin-top: 0.75rem;
+}
+
+.button-star {
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 0.4rem 0.8rem;
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    color: var(--ink);
+}
+
+.button-star--active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
 .education-form {
     width: 100%;
     max-width: 100%;
@@ -395,6 +422,12 @@ h1, .brand {
 
 .form-error {
     color: #b42318;
+    font-size: 0.85rem;
+    margin-top: 0.35rem;
+}
+
+.form-help {
+    color: var(--text-muted);
     font-size: 0.85rem;
     margin-top: 0.35rem;
 }
