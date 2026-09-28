@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block meta %}
+    <title>Access denied - {{ name }}</title>
+{% endblock meta %}
+
+{% block content %}
+    <section class="education-section">
+        <div class="container">
+            <p class="section-kicker">Error 403</p>
+            <h1>Access denied</h1>
+            <p>Your account does not have permission to do that.</p>
+            <a href="{% url 'main:show_education' %}" class="button">Back to Education</a>
+        </div>
+    </section>
+{% endblock content %}
