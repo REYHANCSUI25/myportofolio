@@ -3,14 +3,24 @@ from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
-from django.core.exceptions import PermissionDenied
 from django.core import serializers
+from django.db.models import Count
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
 
+from main.decorators import LOGIN_URL, permission_required_or_403
 from main.forms import EducationForm
 from main.models import Experience, Education
-# Create your views here.
+
+EDUCATION_PUBLIC_FIELDS = (
+    "institution",
+    "degree",
+    "description",
+    "started_at",
+    "ended_at",
+)
 
 def show_main(request):
     last_login = request.COOKIES.get("last_login", "No active login session / Cookie not found")
@@ -42,8 +52,26 @@ def get_educations_json(request):
     if institution_query:
         educations = educations.filter(institution__icontains=institution_query)
 
-    educations_json = serializers.serialize("json", educations)
+    educations_json = serializers.serialize(
+        "json",
+        educations,
+        fields=EDUCATION_PUBLIC_FIELDS,
+    )
     return HttpResponse(educations_json, content_type="application/json")
+
+
+def attach_star_state(educations, user):
+    star_counts = dict(
+        Education.objects.annotate(total=Count("starred_by")).values_list("pk", "total")
+    )
+    starred_ids = set()
+    if user.is_authenticated:
+        starred_ids = set(user.starred_education.values_list("pk", flat=True))
+
+    for education in educations:
+        education.star_count = star_counts.get(education.pk, 0)
+        education.is_starred = education.pk in starred_ids
+    return educations
 
 
 def show_education(request):
@@ -54,6 +82,7 @@ def show_education(request):
         json_response.content.decode("utf-8"),
     )
     educations = [education.object for education in educations]
+    educations = attach_star_state(educations, request.user)
     institution_query = request.GET.get("institution", "").strip()
 
     context = {
@@ -64,22 +93,21 @@ def show_education(request):
     return render(request, "education.html", context)
 
 
-@login_required(login_url="/login/")
+@login_required(login_url=LOGIN_URL)
+@require_POST
 def toggle_star(request, education_id):
     education = get_object_or_404(Education, pk=education_id)
 
-    if request.user in education.starred_by.all():
+    if education.starred_by.filter(pk=request.user.pk).exists():
         education.starred_by.remove(request.user)
     else:
         education.starred_by.add(request.user)
 
     return redirect("main:show_education")
 
-@login_required(login_url="/login/")
-def create_education(request):
-    if not request.user.is_superuser:
-        raise PermissionDenied
 
+@permission_required_or_403("main.add_education")
+def create_education(request):
     form = EducationForm(request.POST or None)
 
     if request.method == "POST" and form.is_valid():
@@ -95,11 +123,8 @@ def create_education(request):
     return render(request, "education_form.html", context)
 
 
-@login_required(login_url="/login/")
+@permission_required_or_403("main.change_education")
 def update_education(request, education_id):
-    if not request.user.is_superuser:
-        raise PermissionDenied
-
     education = get_object_or_404(Education, pk=education_id)
     form = EducationForm(request.POST or None, instance=education)
 
@@ -115,18 +140,13 @@ def update_education(request, education_id):
     }
     return render(request, "education_form.html", context)
 
-@login_required(login_url="/login/")
+
+@permission_required_or_403("main.delete_education")
+@require_POST
 def delete_education(request, education_id):
-    if not request.user.is_superuser:
-        raise PermissionDenied
-
     education = get_object_or_404(Education, pk=education_id)
-
-    if request.method == "POST":
-        education.delete()
-        messages.success(request, "Education entry deleted!")
-        return redirect("main:show_education")
-
+    education.delete()
+    messages.success(request, "Education entry deleted!")
     return redirect("main:show_education")
 
 
@@ -145,19 +165,31 @@ def register(request):
     return render(request, "register.html", context)
 
 
+def get_safe_next_url(request):
+    next_url = request.POST.get("next") or request.GET.get("next") or ""
+    is_safe = url_has_allowed_host_and_scheme(
+        next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    )
+    return next_url if is_safe else ""
+
+
 def login_user(request):
     form = AuthenticationForm(request, data=request.POST or None)
+    next_url = get_safe_next_url(request)
 
     if request.method == "POST" and form.is_valid():
         user = form.get_user()
         login(request, user)
-        response = redirect("main:show_main")
+        response = redirect(next_url or "main:show_main")
         response.set_cookie("last_login", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         return response
 
     context = {
         "name": "Muhammad Reyhan Attarizky",
         "form": form,
+        "next": next_url,
     }
     return render(request, "login.html", context)
 

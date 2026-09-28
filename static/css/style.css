@@ -618,3 +618,30 @@ h1, .brand {
         grid-template-columns: 1fr;
     }
 }
+
+.star-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+}
+
+.star-count {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.role-badge {
+    display: inline-block;
+    margin-left: 0.35rem;
+    padding: 0.1rem 0.5rem;
+    font-size: 0.75rem;
+    color: var(--paper);
+    background-color: var(--ink);
+    border-radius: var(--radius);
+}
+
+a.button-star {
+    display: inline-block;
+    text-decoration: none;
+}

@@ -10,7 +10,7 @@
                 <p class="section-kicker">Academic background</p>
                 <div class="education-header">
                     <h1>Education</h1>
-                    {% if user.is_superuser %}
+                    {% if perms.main.add_education %}
                         <a href="{% url 'main:create_education' %}"
                            class="button education-add-button">
                             <span aria-hidden="true">+</span>
@@ -51,19 +51,28 @@
                             {% if education.is_ongoing %}
                                 <span class="education-status education-status--ongoing">Ongoing</span>
                             {% endif %}
-                            {% if user.is_authenticated %}
-                                <form method="post" action="{% url 'main:toggle_star' education.id %}" class="star-form">
-                                    {% csrf_token %}
-                                    <button type="submit" class="button-star{% if user in education.starred_by.all %} button-star--active{% endif %}">
-                                        {% if user in education.starred_by.all %}★ Starred{% else %}☆ Star{% endif %}
-                                    </button>
-                                </form>
-                            {% endif %}
-                            {% if user.is_superuser %}
+                            <div class="star-row">
+                                {% if user.is_authenticated %}
+                                    <form method="post" action="{% url 'main:toggle_star' education.id %}" class="star-form">
+                                        {% csrf_token %}
+                                        <button type="submit" class="button-star{% if education.is_starred %} button-star--active{% endif %}">
+                                            {% if education.is_starred %}★ Starred{% else %}☆ Star{% endif %}
+                                        </button>
+                                    </form>
+                                {% else %}
+                                    <a href="{% url 'main:login' %}?next={{ request.get_full_path|urlencode }}" class="button-star">☆ Log in to star</a>
+                                {% endif %}
+                                <span class="star-count">{{ education.star_count }} star{{ education.star_count|pluralize }}</span>
+                            </div>
+                            {% if perms.main.change_education or perms.main.delete_education %}
                                 <div class="education-card-actions">
-                                    <a href="{% url 'main:update_education' education.id %}"
-                                       class="button button-secondary">Edit</a>
-                                    {% include "components/education_delete_modal.html" with education=education %}
+                                    {% if perms.main.change_education %}
+                                        <a href="{% url 'main:update_education' education.id %}"
+                                           class="button button-secondary">Edit</a>
+                                    {% endif %}
+                                    {% if perms.main.delete_education %}
+                                        {% include "components/education_delete_modal.html" with education=education %}
+                                    {% endif %}
                                 </div>
                             {% endif %}
                         </article>
