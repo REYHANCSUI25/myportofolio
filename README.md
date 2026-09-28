@@ -6,6 +6,54 @@ Class : PBP KKI
 
 Portfolio repo for PBP KKI, Odd Semester 2026/2027
 
+## Overview
+
+A personal portfolio website built with Django as the individual project of Platform-Based Programming (CSGE602022), Fasilkom UI. The portfolio section is **Education**: public list and JSON endpoints, with data changes and stars controlled by user roles.
+
+Live site: https://muhammad-reyhan53-myportofolio.pws.cs.ui.ac.id
+
+## Setup
+
+1. `git clone https://github.com/REYHANCSUI25/myportofolio.git` then `cd myportofolio`
+2. `python -m venv env`
+3. Windows PowerShell: `env\Scripts\activate` (macOS/Linux: `source env/bin/activate`)
+4. `pip install -r requirements.txt`
+5. `python manage.py migrate`
+6. `python manage.py createsuperuser` (this account becomes the portfolio owner)
+7. `python manage.py runserver` and open http://127.0.0.1:8000/
+
+No `.env` file is needed locally; the project defaults to SQLite when `PRODUCTION` is not set to `True`.
+
+### Creating the Editor role (one-time, via Django Admin)
+
+1. Log in as the superuser and open `/admin/`.
+2. Authentication and Authorization > Groups > Add group.
+3. Name it exactly `Editor`.
+4. Under "Chosen permissions" add only `main | education | Can change education`, then Save.
+5. Authentication and Authorization > Users > open the user > add the `Editor` group > Save.
+
+The group must be created once per database, so repeat these steps on the deployed site's admin.
+
+## Roles and Permissions
+
+| Action | Visitor | Regular user | Editor | Owner (superuser) |
+| --- | --- | --- | --- | --- |
+| Read Education page and JSON | Yes | Yes | Yes | Yes |
+| Give or remove a star | Log in first | Yes | Yes | Yes |
+| Update an entry | Log in first | 403 | Yes | Yes |
+| Create an entry | Log in first | 403 | 403 | Yes |
+| Delete an entry | Log in first | 403 | 403 | Yes |
+
+## Weekly Progress
+
+| Week | Work |
+| --- | --- |
+| Tutorial 0 and 1 | Project setup, views, templates, HTML5/CSS3, PWS deployment |
+| Assignment 1 | Static portfolio page with semantic HTML |
+| Assignment 2 | Education model, list view, base template inheritance |
+| Assignment 3 | ModelForm create/update/delete, JSON endpoints, institution search |
+| Assignment 4 | Editor role via Django Group, server-side 403/redirect enforcement, POST-only star toggle with counts, JSON leak fix, login redirect back to the requested page, custom 403 page |
+
 ### Assignment 1
 
 1. Yes, I used semantic HTML elements such as <section> and <article> to organize the website into clear parts. These elements helped structure the static web and made the HTML easier to understand and maintain. They also made it clearer which content belonged to which part of the portfolio.
@@ -43,3 +91,22 @@ ChatGPT and Google's AI Overview was used for me to learn the following:
 2. Prefilling a form with an existing database row by passing instance to the form class, so editing something loads its current values instead of showing a blank form.
 3. Creating a feature branch, doing the work only on that branch, then merging it back with an explicit merge commit instead of a fast forward, so the branch's shape stays visible in the history afterward.
 4. Undoing commits with git reset while keeping the actual file changes intact, rather than losing the work outright.
+
+### Assignment 4
+
+**What was implemented**
+
+1. Editor role: a Django `Group` named `Editor` holding only the `main.change_education` permission, assigned to users exclusively through Django Admin. The owner keeps every permission because superusers pass all permission checks; regular users hold none.
+2. Server-side access control: `main/decorators.py` defines `permission_required_or_403`, which sends anonymous visitors to the login page and returns HTTP 403 to logged-in users who lack the permission. `create_education` requires `main.add_education`, `update_education` requires `main.change_education`, and `delete_education` requires `main.delete_education`, so the Editor group cannot create or delete without any role-specific code in the views.
+3. Template gating: Add, Edit and Delete controls render only when `perms.main.add_education`, `perms.main.change_education` or `perms.main.delete_education` is true. The navbar shows an Owner or Editor badge.
+4. Stars: `toggle_star` is `@require_POST` and login-protected, uses the `starred_by` ManyToManyField (one star per user by construction), and the Education page shows each entry's total star count plus whether the current user has starred it. Visitors see the count and a "Log in to star" link.
+5. API integrity: the Education JSON endpoint now serializes an explicit field whitelist, so the `starred_by` user IDs no longer appear in the public response.
+6. Extras: custom `403.html`, safe `next` redirect after login (external URLs are rejected), and `delete_education` now rejects GET requests with 405.
+7. 30 automated tests cover all four roles, button visibility per role, the 403 template, star toggling and counts, the JSON field whitelist, and the login redirect.
+
+ChatGPT was used for me to learn or discover the following:
+1. Defining the Editor role as a Django Group holding the `main.change_education` permission, instead of hardcoding `is_superuser` in each view.
+2. The difference between "not logged in" and "logged in but not allowed". `login_required` redirects to the login page, while `permission_required(..., raise_exception=True)` returns HTTP 403, so `login_required` has to wrap the permission check or visitors would get a 403 instead of a redirect.
+3. Restricting state-changing views with `@require_POST` so a GET returns 405, and passing a `fields` whitelist to `serializers.serialize` so the public JSON no longer exposes the `starred_by` user IDs.
+4. Validating the `next` parameter with `url_has_allowed_host_and_scheme`, so login can send someone back to the page they came from without allowing redirects to an external site.
+5. Getting star counts with `annotate(Count(...))` in one query, instead of running a query for every card while the template loops.
