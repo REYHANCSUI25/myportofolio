@@ -1,5 +1,7 @@
 from django import forms
+from django.core.exceptions import ValidationError
 from django.forms import ModelForm
+from django.utils.html import strip_tags
 
 from main.models import Education
 
@@ -49,3 +51,18 @@ class EducationForm(ModelForm):
                 attrs={"type": "date"}
             ),
         }
+
+    def clean_institution(self):
+        institution = strip_tags(self.cleaned_data["institution"]).strip()
+        if not institution:
+            raise ValidationError("Institution can't contain only HTML tags.")
+        return institution
+
+    def clean_degree(self):
+        degree = strip_tags(self.cleaned_data["degree"]).strip()
+        if not degree:
+            raise ValidationError("Degree can't contain only HTML tags.")
+        return degree
+
+    def clean_description(self):
+        return strip_tags(self.cleaned_data["description"]).strip()

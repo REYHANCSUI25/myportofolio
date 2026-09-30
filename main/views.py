@@ -5,7 +5,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.core import serializers
 from django.db.models import Count
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
@@ -13,14 +13,6 @@ from django.views.decorators.http import require_POST
 from main.decorators import LOGIN_URL, permission_required_or_403
 from main.forms import EducationForm
 from main.models import Experience, Education
-
-EDUCATION_PUBLIC_FIELDS = (
-    "institution",
-    "degree",
-    "description",
-    "started_at",
-    "ended_at",
-)
 
 def show_main(request):
     last_login = request.COOKIES.get("last_login", "No active login session / Cookie not found")
@@ -52,43 +44,39 @@ def get_educations_json(request):
     if institution_query:
         educations = educations.filter(institution__icontains=institution_query)
 
-    educations_json = serializers.serialize(
-        "json",
-        educations,
-        fields=EDUCATION_PUBLIC_FIELDS,
-    )
-    return HttpResponse(educations_json, content_type="application/json")
-
-
-def attach_star_state(educations, user):
     star_counts = dict(
         Education.objects.annotate(total=Count("starred_by")).values_list("pk", "total")
     )
     starred_ids = set()
-    if user.is_authenticated:
-        starred_ids = set(user.starred_education.values_list("pk", flat=True))
+    if request.user.is_authenticated:
+        starred_ids = set(request.user.starred_education.values_list("pk", flat=True))
 
-    for education in educations:
-        education.star_count = star_counts.get(education.pk, 0)
-        education.is_starred = education.pk in starred_ids
-    return educations
+    data = [
+        {
+            "pk": str(education.pk),
+            "fields": {
+                "institution": education.institution,
+                "degree": education.degree,
+                "description": education.description,
+                "started_year": education.started_at.year,
+                "ended_year": education.ended_at.year if education.ended_at else None,
+                "is_ongoing": education.is_ongoing,
+                "star_count": star_counts.get(education.pk, 0),
+                "is_starred": education.pk in starred_ids,
+            },
+        }
+        for education in educations
+    ]
+    return JsonResponse(data, safe=False)
 
 
 def show_education(request):
-    json_response = get_educations_json(request)
-
-    educations = serializers.deserialize(
-        "json",
-        json_response.content.decode("utf-8"),
-    )
-    educations = [education.object for education in educations]
-    educations = attach_star_state(educations, request.user)
     institution_query = request.GET.get("institution", "").strip()
 
     context = {
         "name": "Muhammad Reyhan Attarizky",
-        "education_list": educations,
         "institution_query": institution_query,
+        "form": EducationForm(),
     }
     return render(request, "education.html", context)
 
@@ -104,6 +92,24 @@ def toggle_star(request, education_id):
         education.starred_by.add(request.user)
 
     return redirect("main:show_education")
+
+
+@require_POST
+def create_education_ajax(request):
+    if not request.user.has_perm("main.add_education"):
+        return JsonResponse(
+            {"message": "Only the portfolio owner can add education entries."},
+            status=403,
+        )
+
+    form = EducationForm(request.POST)
+    if form.is_valid():
+        education = form.save()
+        return JsonResponse(
+            {"message": "Education entry added successfully.", "pk": str(education.pk)},
+            status=201,
+        )
+    return JsonResponse({"errors": form.errors.get_json_data()}, status=400)
 
 
 @permission_required_or_403("main.add_education")
