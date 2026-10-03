@@ -136,4 +136,4 @@ ChatGPT was used for me to learn or discover the following:
 4. Guarding `if (educationForm) { ... }` before attaching an event listener, since a Popover modal that's conditionally rendered per role means `document.getElementById()` returns `null` on pages where that role doesn't have the modal.
 
 Limitation I observed:
-ChatGPT cannot access the live PWS deployment or its database, so the Editor group's existence there was never confirmed by Claude directly; I verified that myself.
+ChatGPT cannot access the live PWS deployment or its database, so the Editor group's existence there was never confirmed by ChatGPT directly; I verified that myself.
