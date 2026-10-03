@@ -98,6 +98,13 @@ class EducationTest(TestCase):
         self.assertContains(response, 'id="empty"')
         self.assertNotContains(response, self.education.degree)
 
+    def test_shared_ajax_utils_script_is_loaded(self):
+        response = self.client.get(reverse("main:show_education"))
+
+        self.assertContains(response, "ajax-utils.js")
+        self.assertNotContains(response, "function escapeHtml")
+        self.assertNotContains(response, "function getCookie")
+
 
 class RoleBasedAccessTest(TestCase):
     def setUp(self):

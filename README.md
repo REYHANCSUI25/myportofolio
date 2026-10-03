@@ -53,6 +53,7 @@ The group must be created once per database, so repeat these steps on the deploy
 | Assignment 2 | Education model, list view, base template inheritance |
 | Assignment 3 | ModelForm create/update/delete, JSON endpoints, institution search |
 | Assignment 4 | Editor role via Django Group, server-side 403/redirect enforcement, POST-only star toggle with counts, JSON leak fix, login redirect back to the requested page, custom 403 page |
+| Assignment 5 | Education page loads via `fetch()` against a hand-built `JsonResponse`, debounced AJAX search, Popover add-education modal with a permission-checked AJAX create endpoint, toast notifications, XSS escaping plus server-side `strip_tags` cleaning, shared `static/js/ajax-utils.js` |
 
 ### Assignment 1
 
@@ -110,3 +111,29 @@ ChatGPT was used for me to learn or discover the following:
 3. Restricting state-changing views with `@require_POST` so a GET returns 405, and passing a `fields` whitelist to `serializers.serialize` so the public JSON no longer exposes the `starred_by` user IDs.
 4. Validating the `next` parameter with `url_has_allowed_host_and_scheme`, so login can send someone back to the page they came from without allowing redirects to an external site.
 5. Getting star counts with `annotate(Count(...))` in one query, instead of running a query for every card while the template loops.
+
+### Assignment 5
+
+1. Debouncing is a technique where a function only runs once a certain amount of time has passed without the triggering event happening again, and every new event resets that timer. Wiring the search box straight to the `input` event would fire the AJAX request once per keystroke, so typing a 6-letter term like "Depok" would send 5 separate requests, most of which get discarded before their response even returns. Debouncing waits until the user stops typing for a short window (300ms here) before actually calling `fetch()`, so a normal typing speed produces one request instead of one per letter. This matters for the server, which no longer runs a redundant query for every keystroke, and for the client, since fewer in-flight responses means less risk of an old, slow response overwriting a newer search's results. I paired this with an `AbortController` for the same reason, so a stale request that does get sent is explicitly cancelled once a newer one starts.
+2. `fetch()` returns a Promise immediately, before the browser has actually received a response from the server. `await` pauses execution inside an `async` function until that Promise settles, so the code written after the `fetch()` call only runs once the response has truly arrived. Without `await`, the next line would run right away while the response variable was still an unresolved Promise rather than the real `Response` object, so calling `.json()` on it or checking `response.ok` would either throw an error or operate on data that doesn't exist yet. In `addEducation`, for example, dropping `await` would mean the code tries to close the modal and decide which toast to show before Django has even validated the form, so the toast would never actually reflect what the server decided.
+3. Cross-Site Scripting is an attack where an attacker gets their own JavaScript to run inside another user's browser, usually by saving it as if it were ordinary data (a title, a description) so it executes every time that data is displayed. Data rendered through a Django template is escaped automatically: printing `{{ value }}` converts characters like `<` and `>` into `&lt;` and `&gt;` before the HTML reaches the browser, so even a stored `<img onerror=...>` payload only ever displays as plain text. AJAX-rendered content skips that protection entirely, because the data arrives as raw JSON and I'm the one deciding how to turn it into HTML, usually by building a template literal and assigning it to `innerHTML`. `innerHTML` has no idea the string is supposed to be plain data, so anything inserted into it, escaped or not, gets parsed as real markup, and an unescaped `<script>` or `onerror` payload runs immediately. That's exactly why `escapeHtml` exists: it replicates Django's own auto-escaping by hand, specifically because switching to AJAX quietly removes the protection the template engine used to provide for free.
+
+**What was implemented**
+
+1. AJAX page load: `show_education` now renders only the page skeleton (loading, error, empty and grid states); `get_educations_json` builds its response by hand with `JsonResponse` instead of `serializers.serialize`, and includes `star_count` and `is_starred` computed for the requesting session.
+2. Debounced search: typing in the institution field waits 300ms after the last keystroke before calling `fetch()`. An `AbortController` also cancels any still-in-flight request once a newer one starts, so a slow late response can't overwrite a newer search's results.
+3. Modal add form: Add Education opens a Popover-based modal instead of a separate page. Submitting it calls a new `create_education_ajax` view through `fetch()`, which checks `request.user.has_perm("main.add_education")` inside the view itself, not just hidden in the template, validates with `EducationForm`, and responds 201, 400 or 403 in JSON.
+4. CSRF: the AJAX POST sends the token through the `X-CSRFToken` header, read from the `csrftoken` cookie by a shared `getCookie()` helper.
+5. Toasts: success and failure, including the server's field-specific validation errors, each show a toast, and the list refreshes by calling `fetchEducations()` again after a successful add, with no page reload.
+6. XSS: every value from the JSON is passed through `escapeHtml()` before being inserted with `innerHTML`, and `EducationForm.clean_institution`, `clean_degree` and `clean_description` call `strip_tags` server-side as a second layer, rejecting an institution that becomes empty once stripped.
+7. Shared code: `getCookie` and `escapeHtml` were moved out of `education.html` into `static/js/ajax-utils.js`, loaded once from `base.html`, exactly as Tutorial 5's own hint suggested, so any other section I add AJAX to later can reuse them instead of redefining them.
+8. 42 automated tests now cover the AJAX create endpoint specifically (403 for every non-owner role, 405 on GET, 400 with field errors, and that a `<script>` tag is stripped before saving), plus a test confirming the shared script is loaded and the old inline copies are gone.
+
+ChatGPT was used for me to learn or discover the following:
+1. Building a `JsonResponse` by hand instead of using `serializers.serialize`, and why `star_count`/`is_starred` need to be computed per request rather than stored as static fields on the model.
+2. Why `fetch()` never rejects on an HTTP error status like 403 or 400 and only rejects on a network failure, which is why every fetch call has to check `response.ok` itself instead of relying on a `catch` block alone.
+3. The limits of `strip_tags`: Django's own documentation states it isn't a sanitizer and doesn't guarantee safe HTML on its own, which is why it's a second layer behind `escapeHtml` rather than a replacement for it.
+4. Guarding `if (educationForm) { ... }` before attaching an event listener, since a Popover modal that's conditionally rendered per role means `document.getElementById()` returns `null` on pages where that role doesn't have the modal.
+
+Limitation I observed:
+ChatGPT cannot access the live PWS deployment or its database, so the Editor group's existence there was never confirmed by Claude directly; I verified that myself.
