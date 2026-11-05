@@ -8,9 +8,11 @@ Portfolio repo for PBP KKI, Odd Semester 2026/2027
 
 ## Overview
 
-A personal portfolio website built with Django as the individual project of Platform-Based Programming (CSGE602022), Fasilkom UI. The portfolio section is **Education**: public list and JSON endpoints, with data changes and stars controlled by user roles.
+A personal portfolio website built with Django as the individual project of Platform-Based Programming (CSGE602022), Fasilkom UI. The portfolio section is **Education**: a page that lists, searches, adds, edits, stars and deletes entries without reloading, backed by a Django REST Framework API at `/api/v1/education/`. Four roles (visitor, regular user, Editor, owner) decide what each person can change.
 
 Live site: https://muhammad-reyhan53-myportofolio.pws.cs.ui.ac.id
+
+Built with Django 5.2, Django REST Framework 3.18, SQLite locally and PostgreSQL on PWS, WhiteNoise for static files, and plain JavaScript (Fetch API and the Popover API) on the page.
 
 ## Setup
 
@@ -21,6 +23,7 @@ Live site: https://muhammad-reyhan53-myportofolio.pws.cs.ui.ac.id
 5. `python manage.py migrate`
 6. `python manage.py createsuperuser` (this account becomes the portfolio owner)
 7. `python manage.py runserver` and open http://127.0.0.1:8000/
+8. Run the tests with `python manage.py test main`
 
 No `.env` file is needed locally; the project defaults to SQLite when `PRODUCTION` is not set to `True`.
 
@@ -38,11 +41,57 @@ The group must be created once per database, so repeat these steps on the deploy
 
 | Action | Visitor | Regular user | Editor | Owner (superuser) |
 | --- | --- | --- | --- | --- |
-| Read Education page and JSON | Yes | Yes | Yes | Yes |
-| Give or remove a star | Log in first | Yes | Yes | Yes |
-| Update an entry | Log in first | 403 | Yes | Yes |
-| Create an entry | Log in first | 403 | 403 | Yes |
-| Delete an entry | Log in first | 403 | 403 | Yes |
+| Read the Education page and API | Yes | Yes | Yes | Yes |
+| Give or remove a star | Log in first (API: 403) | Yes | Yes | Yes |
+| Edit an entry (`PUT`/`PATCH`) | Log in first (API: 403) | 403 | Yes | Yes |
+| Create an entry (`POST`) | Log in first (API: 403) | 403 | 403 | Yes |
+| Delete an entry (`DELETE`) | Log in first (API: 403) | 403 | 403 | Yes |
+
+One set of Django model permissions (`main.add_education`, `main.change_education`, `main.delete_education`) drives all three layers: the HTML views, the API's `IsPortfolioOwnerOrEditorOrReadOnly` permission class, and the buttons the page draws. Superusers pass every permission check automatically, and the `Editor` group holds only `main.change_education`.
+
+## REST API
+
+Base path: `/api/v1/`. Requests are authenticated by the site's login session, so log in through the site or the browsable API's "Log in" link. Every request that changes data must send the `X-CSRFToken` header; the Education page reads the token from the `csrftoken` cookie.
+
+| Method | Endpoint | Allowed for | Success | Notes |
+| --- | --- | --- | --- | --- |
+| `GET` | `/api/v1/education/` | Everyone | 200 | `?institution=` filters by institution (case-insensitive, partial match) |
+| `POST` | `/api/v1/education/` | Owner | 201 | Returns the created entry |
+| `GET` | `/api/v1/education/<id>/` | Everyone | 200 | 404 if the entry doesn't exist |
+| `PUT` | `/api/v1/education/<id>/` | Owner, Editor | 200 | Full update: every required field must be sent |
+| `PATCH` | `/api/v1/education/<id>/` | Owner, Editor | 200 | Partial update: only the fields sent are changed |
+| `DELETE` | `/api/v1/education/<id>/` | Owner | 204 | Empty body |
+| `POST` | `/api/v1/education/<id>/star/` | Any logged-in user | 200 | Toggles your star and returns the entry |
+
+Invalid input returns 400 with errors per field, actions a role can't perform return 403, and missing entries return 404. For writes the role check runs first, so a role that can't make a change gets 403 whether or not the entry exists.
+
+Example entry:
+
+```json
+{
+    "id": "3f2c9a1e-5b7d-4c8e-9a2f-1d6b8e4c7a90",
+    "institution": "Universitas Indonesia",
+    "degree": "S1 Ilmu Komputer KKI",
+    "description": "Third-semester student in Ilmu Komputer KKI UI.",
+    "started_at": "2025-08-01",
+    "ended_at": null,
+    "is_ongoing": true,
+    "star_count": 1,
+    "is_starred": false
+}
+```
+
+Validation rules, shared by the API serializer and the HTML form through `main/validators.py`:
+
+- `institution`, `degree` and `description` can't be blank or made only of HTML tags; tags are stripped with `strip_tags` before saving.
+- `ended_at` can't be before `started_at`. A `PATCH` checks the new date against the stored one, and skips the check when it changes no dates.
+- `id`, `is_ongoing`, `star_count` and `is_starred` are read-only, and the API never exposes who starred an entry.
+
+Two older endpoints are kept so earlier assignments keep working, but the page no longer uses them: `GET /api/education/` (the Tutorial 3–5 JSON) and `POST /education/add-ajax/` (Tutorial 5).
+
+## Running the Tests
+
+`python manage.py test main` runs 80 tests. `main/tests_api.py` covers the API for every role (rejected writes also check the database stayed unchanged), validation, CSRF with a real logged-in session, read-only fields, 404s and a query-count check. `main/tests.py` covers the HTML views, the page's role flags, the form, stars and the login redirect.
 
 ## Weekly Progress
 
@@ -54,6 +103,7 @@ The group must be created once per database, so repeat these steps on the deploy
 | Assignment 3 | ModelForm create/update/delete, JSON endpoints, institution search |
 | Assignment 4 | Editor role via Django Group, server-side 403/redirect enforcement, POST-only star toggle with counts, JSON leak fix, login redirect back to the requested page, custom 403 page |
 | Assignment 5 | Education page loads via `fetch()` against a hand-built `JsonResponse`, debounced AJAX search, Popover add-education modal with a permission-checked AJAX create endpoint, toast notifications, XSS escaping plus server-side `strip_tags` cleaning, shared `static/js/ajax-utils.js` |
+| Assignment 6 | Django REST Framework API for Education under `/api/v1/` (built in Tutorial 7), page switched to the API, edit modal that saves only the changed fields with `PATCH` for the Editor and owner, inline and toast error messages, end-date and HTML-only validation shared by the form and serializer, page script moved to `static/js/education.js`, 80 tests |
 
 ### Assignment 1
 
@@ -137,3 +187,57 @@ ChatGPT was used for me to learn or discover the following:
 
 Limitation I observed:
 ChatGPT cannot access the live PWS deployment or its database, so the Editor group's existence there was never confirmed by ChatGPT directly; I verified that myself.
+
+### Assignment 6
+
+1. REST (Representational State Transfer) is a way of designing an API around resources instead of actions. Each thing the API manages has its own URL, and clients act on it with standard HTTP methods whose meaning is the same everywhere. In my API, `/api/v1/education/` is the collection and `/api/v1/education/<id>/` is one entry: `GET` reads, `POST` creates, `PUT` and `PATCH` update and `DELETE` removes. Every response's status code says what happened: 201 after creating, 204 after deleting, 400 for invalid input, 403 for an action the role can't do, 404 for a missing entry. Returning JSON alone isn't enough to make an API RESTful. My Tutorial 5 endpoints already returned JSON, but they used action-style URLs like `/education/add-ajax/` and `/education/<id>/delete/`, sent every change as `POST`, and answered with redirects instead of meaningful status codes, so a client had to learn each URL's quirks instead of relying on one uniform contract. Strictly, REST also asks every request to be self-contained; my API relies on the login session cookie, which is a common compromise when the API is used by the site's own pages. `PUT` is a full update: the request has to include every required field, and leaving one out returns 400. `PATCH` is a partial update: only the fields that are sent change. My edit modal uses `PATCH` and sends only what the user actually changed, so renaming a degree sends just `{"degree": "..."}` and clearing the end date sends just `{"ended_at": null}`. `PUT` fits a client that already holds the whole record and wants to overwrite it in one go, such as a script that re-imports every education entry from a spreadsheet.
+2. A serializer is the contract between the model and the outside world. In one class, `EducationSerializer` decides which fields appear in the JSON (an explicit list, so nothing is exposed by accident) and converts values into JSON types: dates become strings like `2025-08-01`, and the `is_ongoing` property and the star information become read-only fields. It also works in the other direction for input. It parses the incoming JSON, checks types and required fields, runs my `validate_<field>` methods (which strip HTML tags) and `validate()` (which checks the end date isn't before the start date), and only then saves. In Tutorial 5 I built each dictionary by hand in a loop for `JsonResponse` and validated input separately through `EducationForm`. The serializer improves on that in several ways. The read and write shapes are defined once, so the list, detail and `PATCH` responses can't drift apart. Read-only fields are enforced automatically, so a client sending `"star_count": 99` or a forged `id` is ignored, which my tests check. Errors come back as a 400 with messages per field, which my page shows under the matching input. Partial updates only need `partial=True`. The browsable API can also build its forms from the serializer. In Tutorial 5 I had to compute values like `started_year` myself and remember to leave out sensitive fields every time I touched that dictionary.
+3. Authentication answers who is making the request; authorization answers what that person is allowed to do. In DRF, authentication runs first: `SessionAuthentication` reads Django's session cookie and sets `request.user`, or leaves an anonymous user. Permission classes then decide whether that user may make this request. My `IsPortfolioOwnerOrEditorOrReadOnly` lets everyone use the safe methods (`GET`, `HEAD`, `OPTIONS`) and maps `POST`, `PUT`/`PATCH` and `DELETE` to `main.add_education`, `main.change_education` and `main.delete_education`. Superusers have all three automatically, and the Editor group only has the second. Because `SessionAuthentication` doesn't send a `WWW-Authenticate` header, DRF answers writes from visitors who aren't logged in with 403 rather than 401. Hiding the Edit or Delete button only changes what the page draws. The endpoint still exists, and anyone can call it directly with `fetch()` from the browser console, with curl, or through the browsable API's forms. If the check lived only in the template, any regular user could `PATCH` or `DELETE` every entry. That's why the permission class runs on the server for every request, and why my tests send writes straight to the API as each role and then check that the database didn't change, instead of only checking which buttons appear.
+4. With `SessionAuthentication`, the browser proves who I am by attaching the session cookie to every request to my site automatically, including requests triggered by another website. Without a CSRF check, a malicious page I visit while logged in could make my browser send a `PATCH` or `DELETE` to `/api/v1/education/...`, and the API would accept it because the cookie is valid. The CSRF token closes that gap: my page reads it from the `csrftoken` cookie and sends it back in the `X-CSRFToken` header. Another site can't do the same, because the browser won't let it read my site's cookies, and it won't send a cross-site request with that custom header unless my server allows it. DRF exempts its views from Django's CSRF middleware and runs the check inside `SessionAuthentication` instead, for unsafe methods whenever the request is authenticated by the session. `force_authenticate` skips authentication entirely: it sets `request.user` directly, so `SessionAuthentication` never runs and neither does its CSRF check, and a test using it would pass even if CSRF protection were missing. On top of that, Django's test client doesn't enforce CSRF at all unless it's created with `enforce_csrf_checks=True`. That's why my CSRF tests use `APIClient(enforce_csrf_checks=True)` and log in with `.login()` to get a real session. They show that the same `POST` or `PATCH` fails with 403 without the token and succeeds with it.
+
+**What was implemented**
+
+Tutorial 7 was done directly on Education, the section I have used in every tutorial and assignment since Tutorial 3, so the DRF API in `main/api_views.py` is this assignment's API. This assignment completes it.
+
+1. The API, built in Tutorial 7: `EducationSerializer` with an explicit field list, read-only `star_count`, `is_starred` and `is_ongoing`, and `validate_<field>` methods that clean text with `strip_tags`. `IsPortfolioOwnerOrEditorOrReadOnly` follows the four roles. Function-based views with `@api_view` and `SessionAuthentication` serve the list (`GET`, `POST`), detail (`GET`, `PUT`, `PATCH`, `DELETE`) and star (`POST`). Search is the `?institution=` query parameter, and the routes are in `main/api_urls.py`.
+2. Editing through the API: Add and Edit share one Popover modal. Edit loads the entry fresh with `GET`, then saves with a `PATCH` that contains only the fields that changed. If nothing changed, no request is sent and a toast says so. The Editor and the owner can both use it.
+3. Errors: a 400 shows each message under its input and in a toast, and focus moves to the first invalid field. A 403 shows the server's message in a toast. If an entry was deleted elsewhere, the resulting 404 removes its card with a toast.
+4. Validation fixes, shared by the form and the serializer through `main/validators.py`. An end date before the start date is rejected; on a `PATCH` it's checked against the stored dates, and only when a date is being changed, so older rows can still be edited. A description made only of HTML tags is rejected instead of being saved empty.
+5. Structure: the page script moved out of the template into `static/js/education.js`. The view builds the API URLs and role flags, and the template passes them to the script with `json_script`. `@ensure_csrf_cookie` sets the CSRF cookie for every role. `requestJson` in `static/js/ajax-utils.js` adds `X-CSRFToken` to every request that changes data and raises an `ApiError` that carries the status and the errors.
+6. Interaction details: an edited card is replaced in place; the list only reloads when a change affects its order or the active search. Focus returns to the Edit button after saving or closing the modal, and the Star button keeps focus after starring.
+7. Tests: 80 in total, 16 of them new. They cover:
+   - an Editor `PATCH` through a real logged-in session, with and without the CSRF token
+   - a regular user with a valid token who is still forbidden
+   - the date rule on `PATCH`, `PUT` and `POST`, older rows, and clearing the end date
+   - HTML-only descriptions
+   - 404 versus 403 for missing entries
+   - the page's role flags, and that the shared helpers load before the page script
+
+Claude was used for me to learn or discover the following:
+1. How one DRF serializer replaces both the hand-built `JsonResponse` dictionary and the separate form validation, and the difference between `validate_<field>` (one field) and `validate()` (rules that compare fields).
+2. Mapping each HTTP method to a Django model permission inside one permission class, and why superusers pass `has_perm` without belonging to any group.
+3. Why a check that compares fields has to fall back to the stored values on a `PATCH` (`getattr(self.instance, ...)`), because a partial update only contains the fields that were sent.
+4. Why `force_authenticate` never runs `SessionAuthentication`'s CSRF check, and why Django's test client skips CSRF unless it's created with `enforce_csrf_checks=True`.
+5. Passing server data to JavaScript with `json_script` instead of writing template tags inside a script, and setting the CSRF cookie with `@ensure_csrf_cookie` instead of relying on a form being on the page.
+6. Using `prefetch_related` with a query-count test (`CaptureQueriesContext`) to prove the list doesn't run one extra query per card.
+
+**AI disclosure**
+
+Tool: Claude (claude.ai)
+
+How I prompted it: I gave Claude the assignment PDF and read-only access to my public GitHub repository, so it built on exactly what I had pushed, and asked for a plan. I then applied every file myself, ran the tests on my laptop, and checked the page in my browser.
+
+Parts Claude wrote: the API files (`serializers.py`, `permissions.py`, `api_views.py`, `api_urls.py`), `main/validators.py`, the edit flow in `static/js/education.js` and `static/js/ajax-utils.js`, the tests, and drafts of this README section. Before handing the code over, it tested it in a headless browser as every role and broke ten pieces of code on purpose to confirm the tests catch each one.
+
+Limitations I observed:
+
+- Claude can't reach my laptop or PWS. Its sandbox blocks `pws.cs.ui.ac.id`, so it tested a copy of my code against a throwaway SQLite database, and checking the live deployment was up to me.
+- Its Tutorial 7 instructions for checking DevTools left out the extra `GET` (status 200) that reloads the list after adding an entry, so what I saw didn't match what it described until it replayed the flow and corrected itself.
+- Its browser test script for this assignment had a timing bug: it waited for a "Success" toast that was still on screen from the previous action, so four checks failed for the wrong reason until it fixed the script.
+
+**Prompting log (summary)**
+
+1. Shared the Tutorial 7 PDF and gave Claude read-only access to my repository. It built the DRF API on Education, switched the page to it, and tested it for every role in a headless browser.
+2. Followed its steps and sent back my terminal output and screenshots. When the status codes in DevTools didn't match its description, I asked it to replay the flow, and it corrected its instructions.
+3. Shared the Assignment 6 PDF and asked for a plan. It built the `PATCH` edit modal, the validation fixes, and the new tests.
+4. Applied the files, ran the tests, checked the page in my browser, and committed on a feature branch with conventional commits.
