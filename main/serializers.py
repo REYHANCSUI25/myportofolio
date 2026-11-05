@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from main.models import Education
-from main.validators import strip_html, strip_html_required
+from main.validators import strip_html_required, validate_period
 
 
 class EducationSerializer(serializers.ModelSerializer):
@@ -31,7 +31,15 @@ class EducationSerializer(serializers.ModelSerializer):
         return strip_html_required(value)
 
     def validate_description(self, value):
-        return strip_html(value)
+        return strip_html_required(value)
+
+    def validate(self, attrs):
+        if "started_at" in attrs or "ended_at" in attrs:
+            validate_period(
+                attrs.get("started_at", getattr(self.instance, "started_at", None)),
+                attrs.get("ended_at", getattr(self.instance, "ended_at", None)),
+            )
+        return attrs
 
     def get_star_count(self, obj):
         return obj.starred_by.count()

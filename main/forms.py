@@ -2,7 +2,7 @@ from django import forms
 from django.forms import ModelForm
 
 from main.models import Education
-from main.validators import strip_html, strip_html_required
+from main.validators import strip_html_required, validate_period
 
 
 class EducationForm(ModelForm):
@@ -58,4 +58,9 @@ class EducationForm(ModelForm):
         return strip_html_required(self.cleaned_data["degree"])
 
     def clean_description(self):
-        return strip_html(self.cleaned_data["description"])
+        return strip_html_required(self.cleaned_data["description"])
+
+    def clean(self):
+        cleaned_data = super().clean()
+        validate_period(cleaned_data.get("started_at"), cleaned_data.get("ended_at"))
+        return cleaned_data

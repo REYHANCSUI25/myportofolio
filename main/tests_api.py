@@ -1,7 +1,9 @@
 import uuid
 from datetime import date
+from pathlib import Path
 
 from django.contrib.auth.models import Group, Permission, User
+from django.contrib.staticfiles import finders
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
@@ -9,6 +11,7 @@ from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
 from main.models import Education
+from main.permissions import IsPortfolioOwnerOrEditorOrReadOnly
 
 
 def make_editor(user):
@@ -270,18 +273,35 @@ class EducationPageUsesApiTest(APITestCase):
     def test_page_script_targets_the_v1_api(self):
         response = self.client.get(self.page_url)
 
-        self.assertContains(response, reverse("api:education-list"))
+        self.assertEqual(response.context["page_config"]["listUrl"], reverse("api:education-list"))
+        self.assertContains(response, 'id="education-page-config"')
         self.assertNotContains(response, reverse("main:get_educations_json"))
 
-    def test_shared_helpers_load_before_the_page_script(self):
+    def test_config_urls_point_at_real_entries_once_the_id_is_filled_in(self):
+        config = self.client.get(self.page_url).context["page_config"]
+        real_id = str(self.education.id)
+
+        detail_url = config["detailUrl"].replace(config["placeholderId"], real_id)
+        star_url = config["starUrl"].replace(config["placeholderId"], real_id)
+        self.assertEqual(detail_url, reverse("api:education-detail", args=[self.education.id]))
+        self.assertEqual(star_url, reverse("api:education-star", args=[self.education.id]))
+        self.assertEqual(self.client.get(detail_url).status_code, status.HTTP_200_OK)
+
+    def test_shared_helpers_and_config_load_before_the_page_script(self):
         html = self.client.get(self.page_url).content.decode()
 
-        self.assertLess(html.index("js/ajax-utils.js"), html.index("const EDUCATION_LIST_ENDPOINT"))
+        helpers = html.index("js/ajax-utils.js")
+        config = html.index('id="education-page-config"')
+        page_script = html.index("js/education.js")
+        self.assertLess(helpers, page_script)
+        self.assertLess(config, page_script)
 
-    def test_page_script_has_no_inline_event_handlers(self):
+    def test_page_and_page_script_have_no_inline_event_handlers(self):
         response = self.client.get(self.page_url)
+        script = Path(finders.find("js/education.js")).read_text(encoding="utf-8")
 
         self.assertNotContains(response, "onclick=")
+        self.assertNotIn("onclick", script)
 
     def test_page_gives_regular_users_a_csrf_cookie_that_the_api_accepts(self):
         client = APIClient(enforce_csrf_checks=True)
@@ -295,3 +315,178 @@ class EducationPageUsesApiTest(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data["is_starred"])
+
+
+class EducationEditFlowTest(APITestCase):
+    def setUp(self):
+        self.owner = User.objects.create_superuser(
+            username="owner", password="test-password", email="owner@example.com",
+        )
+        self.editor = User.objects.create_user(username="editor", password="test-password")
+        self.regular = User.objects.create_user(username="regular", password="test-password")
+        make_editor(self.editor)
+
+        self.ongoing = Education.objects.create(
+            institution="Universitas Indonesia",
+            degree="S1 Ilmu Komputer KKI",
+            description="Studying computer science.",
+            started_at=date(2025, 8, 1),
+        )
+        self.finished = Education.objects.create(
+            institution="SMA Labschool Rawamangun",
+            degree="MIPA",
+            description="Completed secondary education.",
+            started_at=date(2020, 7, 1),
+            ended_at=date(2023, 6, 1),
+        )
+        self.ongoing_url = reverse("api:education-detail", args=[self.ongoing.id])
+        self.finished_url = reverse("api:education-detail", args=[self.finished.id])
+        self.page_url = reverse("main:show_education")
+
+    def session_client(self, username):
+        client = APIClient(enforce_csrf_checks=True)
+        self.assertTrue(client.login(username=username, password="test-password"))
+        client.get(self.page_url)
+        return client, client.cookies["csrftoken"].value
+
+    def test_editor_can_patch_through_a_real_session_with_the_csrf_token(self):
+        client, token = self.session_client("editor")
+        response = client.patch(
+            self.ongoing_url, {"degree": "S1 Ilmu Komputer"}, format="json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.ongoing.refresh_from_db()
+        self.assertEqual(self.ongoing.degree, "S1 Ilmu Komputer")
+        self.assertEqual(self.ongoing.institution, "Universitas Indonesia")
+
+    def test_editor_patch_without_the_csrf_token_is_rejected(self):
+        client, _ = self.session_client("editor")
+        response = client.patch(self.ongoing_url, {"degree": "Changed"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.ongoing.refresh_from_db()
+        self.assertEqual(self.ongoing.degree, "S1 Ilmu Komputer KKI")
+
+    def test_valid_csrf_token_does_not_give_a_regular_user_edit_rights(self):
+        client, token = self.session_client("regular")
+        response = client.patch(
+            self.ongoing_url, {"degree": "Changed"}, format="json", HTTP_X_CSRFTOKEN=token,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data["detail"], IsPortfolioOwnerOrEditorOrReadOnly.message)
+        self.ongoing.refresh_from_db()
+        self.assertEqual(self.ongoing.degree, "S1 Ilmu Komputer KKI")
+
+    def test_patch_response_is_ready_to_render_as_a_card(self):
+        self.ongoing.starred_by.add(self.editor)
+        self.client.force_authenticate(user=self.editor)
+        response = self.client.patch(self.ongoing_url, {"description": "Updated."}, format="json")
+
+        self.assertEqual(response.data["description"], "Updated.")
+        self.assertEqual(response.data["star_count"], 1)
+        self.assertTrue(response.data["is_starred"])
+        self.assertTrue(response.data["is_ongoing"])
+
+    def test_end_date_before_the_stored_start_date_is_rejected(self):
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.patch(self.ongoing_url, {"ended_at": "2024-12-31"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("ended_at", response.data)
+        self.ongoing.refresh_from_db()
+        self.assertIsNone(self.ongoing.ended_at)
+
+    def test_start_date_after_the_stored_end_date_is_rejected(self):
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.patch(self.finished_url, {"started_at": "2024-01-01"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("ended_at", response.data)
+        self.finished.refresh_from_db()
+        self.assertEqual(self.finished.started_at, date(2020, 7, 1))
+
+    def test_put_and_post_reject_an_end_date_before_the_start_date(self):
+        self.client.force_authenticate(user=self.owner)
+        payload = {
+            "institution": "The University of Queensland",
+            "degree": "Bachelor of Computer Science",
+            "description": "Partner university.",
+            "started_at": "2028-02-13",
+            "ended_at": "2027-06-15",
+        }
+
+        self.assertEqual(
+            self.client.put(self.ongoing_url, payload, format="json").status_code, 400,
+        )
+        self.assertEqual(
+            self.client.post(reverse("api:education-list"), payload, format="json").status_code,
+            400,
+        )
+        self.assertEqual(Education.objects.count(), 2)
+
+    def test_patch_without_dates_skips_the_period_check_for_older_rows(self):
+        legacy = Education.objects.create(
+            institution="Legacy",
+            degree="Saved before date checks existed",
+            description="Old text.",
+            started_at=date(2022, 1, 1),
+            ended_at=date(2021, 1, 1),
+        )
+        self.client.force_authenticate(user=self.editor)
+        response = self.client.patch(
+            reverse("api:education-detail", args=[legacy.id]),
+            {"description": "New text."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.description, "New text.")
+
+    def test_patch_can_clear_the_end_date_to_mark_an_entry_ongoing(self):
+        self.client.force_authenticate(user=self.editor)
+        response = self.client.patch(self.finished_url, {"ended_at": None}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["is_ongoing"])
+        self.finished.refresh_from_db()
+        self.assertIsNone(self.finished.ended_at)
+
+    def test_html_only_description_is_rejected_on_create_and_edit(self):
+        self.client.force_authenticate(user=self.owner)
+        create = self.client.post(reverse("api:education-list"), {
+            "institution": "The University of Queensland",
+            "degree": "Bachelor of Computer Science",
+            "description": "<p></p>",
+            "started_at": "2028-02-13",
+        }, format="json")
+        edit = self.client.patch(self.ongoing_url, {"description": "<b></b>"}, format="json")
+
+        self.assertEqual(create.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("description", create.data)
+        self.assertEqual(edit.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(Education.objects.count(), 2)
+        self.ongoing.refresh_from_db()
+        self.assertEqual(self.ongoing.description, "Studying computer science.")
+
+    def test_missing_entry_is_404_for_permitted_roles_and_403_for_others(self):
+        missing = uuid.uuid4()
+        detail = reverse("api:education-detail", args=[missing])
+        star = reverse("api:education-star", args=[missing])
+
+        self.client.force_authenticate(user=self.owner)
+        self.assertEqual(self.client.patch(detail, {"degree": "x"}, format="json").status_code, 404)
+        self.assertEqual(self.client.delete(detail).status_code, 404)
+        self.assertEqual(self.client.post(star).status_code, 404)
+
+        self.client.force_authenticate(user=self.editor)
+        self.assertEqual(self.client.patch(detail, {"degree": "x"}, format="json").status_code, 404)
+
+        self.client.force_authenticate(user=self.regular)
+        self.assertEqual(self.client.patch(detail, {"degree": "x"}, format="json").status_code, 403)
+
+        self.client.force_authenticate(user=None)
+        self.assertEqual(self.client.post(star).status_code, 403)

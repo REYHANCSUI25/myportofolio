@@ -1,3 +1,5 @@
+const SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
+
 function escapeHtml(value) {
     return String(value ?? "")
         .replaceAll("&", "&amp;")
@@ -41,19 +43,34 @@ function apiErrorMessage(data, status) {
     return messages.join(" ") || fallback;
 }
 
-async function sendJson(url, method, payload) {
+class ApiError extends Error {
+    constructor(status, data) {
+        super(apiErrorMessage(data, status));
+        this.name = "ApiError";
+        this.status = status;
+        this.data = data;
+    }
+}
+
+function errorMessageFor(error) {
+    if (error instanceof ApiError) return error.message;
+    return "Couldn't reach the server. Check your connection and try again.";
+}
+
+async function requestJson(url, { method = "GET", body, signal } = {}) {
+    const headers = { Accept: "application/json" };
+    if (!SAFE_METHODS.includes(method)) headers["X-CSRFToken"] = getCookie("csrftoken") ?? "";
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+
     const response = await fetch(url, {
         method,
-        headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            "X-CSRFToken": getCookie("csrftoken") ?? "",
-        },
-        body: payload === undefined ? undefined : JSON.stringify(payload),
+        headers,
+        signal,
+        body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (response.status === 204) return null;
 
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(apiErrorMessage(data, response.status));
+    const data = await response.json().catch(() => null);
+    if (!response.ok) throw new ApiError(response.status, data);
     return data;
 }

@@ -6,6 +6,7 @@ from django.urls import reverse
 from django.utils import timezone
 from datetime import date
 
+from main.forms import EducationForm
 from main.models import Experience, Education
 # Create your tests here.
 
@@ -210,40 +211,83 @@ class RoleBasedAccessTest(TestCase):
 
         self.assertTemplateUsed(response, "403.html")
 
-    def test_visitor_gets_no_add_modal_and_false_js_permission_flags(self):
-        response = self.client.get(reverse("main:show_education"))
+    def page_for(self, user=None):
+        if user:
+            self.login_as(user)
+        return self.client.get(reverse("main:show_education"))
 
-        self.assertNotContains(response, 'id="add-education-modal"')
-        self.assertContains(response, 'const IS_AUTHENTICATED = "false" === "true";')
-        self.assertContains(response, 'const CAN_EDIT = "false" === "true";')
-        self.assertContains(response, 'const CAN_DELETE = "false" === "true";')
+    def assert_page_flags(self, response, **expected):
+        config = response.context["page_config"]
+        for flag, value in expected.items():
+            self.assertIs(config[flag], value, flag)
 
-    def test_regular_user_is_authenticated_with_no_edit_or_delete_flags(self):
-        self.login_as(self.regular)
-        response = self.client.get(reverse("main:show_education"))
+    def test_visitor_gets_no_modal_and_no_write_flags(self):
+        response = self.page_for()
 
-        self.assertNotContains(response, 'id="add-education-modal"')
-        self.assertContains(response, 'const IS_AUTHENTICATED = "true" === "true";')
-        self.assertContains(response, 'const CAN_EDIT = "false" === "true";')
-        self.assertContains(response, 'const CAN_DELETE = "false" === "true";')
+        self.assertNotContains(response, 'id="education-modal"')
+        self.assertNotContains(response, "education-add-button")
+        self.assert_page_flags(
+            response, isAuthenticated=False, canAdd=False, canEdit=False, canDelete=False,
+        )
 
-    def test_editor_gets_edit_flag_but_no_add_modal(self):
-        self.login_as(self.editor)
-        response = self.client.get(reverse("main:show_education"))
+    def test_regular_user_is_authenticated_with_no_write_flags(self):
+        response = self.page_for(self.regular)
 
-        self.assertNotContains(response, 'id="add-education-modal"')
-        self.assertContains(response, 'const CAN_EDIT = "true" === "true";')
-        self.assertContains(response, 'const CAN_DELETE = "false" === "true";')
+        self.assertNotContains(response, 'id="education-modal"')
+        self.assert_page_flags(
+            response, isAuthenticated=True, canAdd=False, canEdit=False, canDelete=False,
+        )
+
+    def test_editor_gets_the_modal_for_editing_but_no_add_button(self):
+        response = self.page_for(self.editor)
+
+        self.assertContains(response, 'id="education-modal"')
+        self.assertNotContains(response, "education-add-button")
+        self.assert_page_flags(
+            response, isAuthenticated=True, canAdd=False, canEdit=True, canDelete=False,
+        )
         self.assertContains(response, "Editor")
 
-    def test_owner_gets_add_modal_and_full_flags(self):
-        self.login_as(self.owner)
-        response = self.client.get(reverse("main:show_education"))
+    def test_owner_gets_the_add_button_the_modal_and_every_flag(self):
+        response = self.page_for(self.owner)
 
-        self.assertContains(response, 'id="add-education-modal"')
-        self.assertContains(response, 'const CAN_EDIT = "true" === "true";')
-        self.assertContains(response, 'const CAN_DELETE = "true" === "true";')
+        self.assertContains(response, 'id="education-modal"')
+        self.assertContains(response, "education-add-button")
+        self.assert_page_flags(
+            response, isAuthenticated=True, canAdd=True, canEdit=True, canDelete=True,
+        )
         self.assertContains(response, "Owner")
+
+
+class EducationFormValidationTest(TestCase):
+    def form_with(self, **changes):
+        data = {
+            "institution": "Universitas Indonesia",
+            "degree": "S1 Ilmu Komputer KKI",
+            "description": "Studying computer science.",
+            "started_at": "2025-08-01",
+            "ended_at": "",
+            **changes,
+        }
+        return EducationForm(data=data)
+
+    def test_complete_form_is_valid(self):
+        self.assertTrue(self.form_with().is_valid())
+
+    def test_end_date_before_start_date_is_rejected_on_the_end_date(self):
+        form = self.form_with(ended_at="2024-12-31")
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("ended_at", form.errors)
+
+    def test_same_start_and_end_date_is_allowed(self):
+        self.assertTrue(self.form_with(ended_at="2025-08-01").is_valid())
+
+    def test_html_only_description_is_rejected(self):
+        form = self.form_with(description="<p></p>")
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("description", form.errors)
 
 
 class ToggleStarTest(TestCase):
