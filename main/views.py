@@ -7,7 +7,9 @@ from django.core import serializers
 from django.db.models import Count
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_POST
 
 from main.decorators import LOGIN_URL, permission_required_or_403
@@ -70,6 +72,24 @@ def get_educations_json(request):
     return JsonResponse(data, safe=False)
 
 
+PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000000"
+
+
+def education_page_config(user):
+    return {
+        "listUrl": reverse("api:education-list"),
+        "detailUrl": reverse("api:education-detail", args=[PLACEHOLDER_ID]),
+        "starUrl": reverse("api:education-star", args=[PLACEHOLDER_ID]),
+        "loginUrl": reverse("main:login"),
+        "placeholderId": PLACEHOLDER_ID,
+        "isAuthenticated": user.is_authenticated,
+        "canAdd": user.has_perm("main.add_education"),
+        "canEdit": user.has_perm("main.change_education"),
+        "canDelete": user.has_perm("main.delete_education"),
+    }
+
+
+@ensure_csrf_cookie
 def show_education(request):
     institution_query = request.GET.get("institution", "").strip()
 
@@ -77,6 +97,7 @@ def show_education(request):
         "name": "Muhammad Reyhan Attarizky",
         "institution_query": institution_query,
         "form": EducationForm(),
+        "page_config": education_page_config(request.user),
     }
     return render(request, "education.html", context)
 
