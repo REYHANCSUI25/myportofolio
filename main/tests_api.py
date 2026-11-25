@@ -8,6 +8,7 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from rest_framework import status
+from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient, APITestCase
 
 from main.models import Education
@@ -70,17 +71,17 @@ class EducationAPITest(APITestCase):
         self.assertEqual(self.client.get(url).status_code, status.HTTP_404_NOT_FOUND)
 
     def test_visitor_and_regular_user_cannot_write(self):
-        for user in (None, self.regular):
+        for user, expected in ((None, 401), (self.regular, 403)):
             with self.subTest(user=user):
                 self.client.force_authenticate(user=user)
                 self.assertEqual(
-                    self.client.post(self.list_url, self.payload, format="json").status_code, 403,
+                    self.client.post(self.list_url, self.payload, format="json").status_code, expected,
                 )
                 self.assertEqual(
                     self.client.patch(self.detail_url, {"institution": "Changed"}, format="json").status_code,
-                    403,
+                    expected,
                 )
-                self.assertEqual(self.client.delete(self.detail_url).status_code, 403)
+                self.assertEqual(self.client.delete(self.detail_url).status_code, expected)
 
         self.assertEqual(Education.objects.count(), 1)
         self.education.refresh_from_db()
@@ -167,7 +168,7 @@ class EducationAPITest(APITestCase):
         self.assertFalse(Education.objects.filter(pk=self.education.id).exists())
 
     def test_star_requires_login_and_toggles(self):
-        self.assertEqual(self.client.post(self.star_url).status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(self.client.post(self.star_url).status_code, status.HTTP_401_UNAUTHORIZED)
 
         self.client.force_authenticate(user=self.regular)
         response = self.client.post(self.star_url)
@@ -472,7 +473,7 @@ class EducationEditFlowTest(APITestCase):
         self.ongoing.refresh_from_db()
         self.assertEqual(self.ongoing.description, "Studying computer science.")
 
-    def test_missing_entry_is_404_for_permitted_roles_and_403_for_others(self):
+    def test_missing_entry_is_404_for_permitted_roles_and_refused_for_others(self):
         missing = uuid.uuid4()
         detail = reverse("api:education-detail", args=[missing])
         star = reverse("api:education-star", args=[missing])
@@ -489,4 +490,106 @@ class EducationEditFlowTest(APITestCase):
         self.assertEqual(self.client.patch(detail, {"degree": "x"}, format="json").status_code, 403)
 
         self.client.force_authenticate(user=None)
-        self.assertEqual(self.client.post(star).status_code, 403)
+        self.assertEqual(self.client.post(star).status_code, 401)
+
+
+class TokenAuthAPITest(APITestCase):
+    def setUp(self):
+        self.owner = User.objects.create_superuser(
+            username="owner", password="test-password", email="owner@example.com",
+        )
+        self.regular = User.objects.create_user(username="regular", password="test-password")
+        self.token_url = reverse("api:auth-token")
+        self.logout_url = reverse("api:auth-logout")
+        self.list_url = reverse("api:education-list")
+        self.payload = {
+            "institution": "The University of Queensland",
+            "degree": "Bachelor of Computer Science",
+            "description": "Continuing under the 2.5+1.5 scheme.",
+            "started_at": "2027-07-01",
+            "ended_at": None,
+        }
+
+    def obtain_token(self, username):
+        response = self.client.post(
+            self.token_url, {"username": username, "password": "test-password"}, format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        return response.data["token"]
+
+    def test_token_login_returns_the_users_token(self):
+        token = self.obtain_token("owner")
+
+        self.assertEqual(token, Token.objects.get(user=self.owner).key)
+
+    def test_token_login_rejects_a_wrong_password(self):
+        response = self.client.post(
+            self.token_url, {"username": "owner", "password": "wrong-password"}, format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(Token.objects.exists())
+
+    def test_owner_can_create_with_a_token_and_no_csrf_token(self):
+        client = APIClient(enforce_csrf_checks=True)
+        client.credentials(HTTP_AUTHORIZATION=f"Token {self.obtain_token('owner')}")
+
+        response = client.post(self.list_url, self.payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Education.objects.get().degree, "Bachelor of Computer Science")
+
+    def test_regular_users_token_still_cannot_create(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.obtain_token('regular')}")
+
+        response = self.client.post(self.list_url, self.payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(Education.objects.exists())
+
+    def test_missing_or_invalid_token_gets_401_with_a_token_challenge(self):
+        response = self.client.post(self.list_url, self.payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response["WWW-Authenticate"], "Token")
+
+        self.client.credentials(HTTP_AUTHORIZATION="Token not-a-real-token")
+        response = self.client.post(self.list_url, self.payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertFalse(Education.objects.exists())
+
+    def test_logout_deletes_the_token(self):
+        token = self.obtain_token("owner")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token}")
+
+        response = self.client.post(self.logout_url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Token.objects.filter(key=token).exists())
+
+        response = self.client.post(self.list_url, self.payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_logout_requires_a_token(self):
+        response = self.client.post(self.logout_url)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_cors_allows_any_origin_outside_production(self):
+        response = self.client.get(self.list_url, HTTP_ORIGIN="http://localhost:5000")
+
+        self.assertEqual(response["Access-Control-Allow-Origin"], "*")
+
+    def test_cors_preflight_allows_the_authorization_header(self):
+        response = self.client.options(
+            self.list_url,
+            HTTP_ORIGIN="http://localhost:5000",
+            HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
+            HTTP_ACCESS_CONTROL_REQUEST_HEADERS="authorization, content-type",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("authorization", response["Access-Control-Allow-Headers"])
+
+    def test_android_emulator_host_is_allowed_outside_production(self):
+        response = self.client.get(self.list_url, HTTP_HOST="10.0.2.2:8000")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)

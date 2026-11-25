@@ -1,11 +1,6 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import status
-from rest_framework.authentication import SessionAuthentication
-from rest_framework.decorators import (
-    api_view,
-    authentication_classes,
-    permission_classes,
-)
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -19,7 +14,6 @@ def educations_with_stars():
 
 
 @api_view(["GET", "HEAD", "POST"])
-@authentication_classes([SessionAuthentication])
 @permission_classes([IsPortfolioOwnerOrEditorOrReadOnly])
 def education_list(request):
     if request.method in ("GET", "HEAD"):
@@ -39,7 +33,6 @@ def education_list(request):
 
 
 @api_view(["GET", "HEAD", "PUT", "PATCH", "DELETE"])
-@authentication_classes([SessionAuthentication])
 @permission_classes([IsPortfolioOwnerOrEditorOrReadOnly])
 def education_detail(request, education_id):
     education = get_object_or_404(educations_with_stars(), pk=education_id)
@@ -64,7 +57,6 @@ def education_detail(request, education_id):
 
 
 @api_view(["POST"])
-@authentication_classes([SessionAuthentication])
 @permission_classes([IsAuthenticated])
 def education_star(request, education_id):
     education = get_object_or_404(Education, pk=education_id)
@@ -76,3 +68,11 @@ def education_star(request, education_id):
 
     serializer = EducationSerializer(education, context={"request": request})
     return Response(serializer.data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def api_logout(request):
+    if request.auth is not None:
+        request.auth.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
