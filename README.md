@@ -8,11 +8,11 @@ Portfolio repo for PBP KKI, Odd Semester 2026/2027
 
 ## Overview
 
-A personal portfolio website built with Django as the individual project of Platform-Based Programming (CSGE602022), Fasilkom UI. The portfolio section is **Education**: a page that lists, searches, adds, edits, stars and deletes entries without reloading, backed by a Django REST Framework API at `/api/v1/education/`. Four roles (visitor, regular user, Editor, owner) decide what each person can change.
+A personal portfolio website built with Django as the individual project of Platform-Based Programming (CSGE602022), Fasilkom UI. The portfolio section is **Education**: a page that lists, searches, adds, edits, stars and deletes entries without reloading, backed by a Django REST Framework API at `/api/v1/education/`. Four roles (visitor, regular user, Editor, owner) decide what each person can change. The same API also serves my Flutter app, [MyPortfolio Mobile](https://github.com/REYHANCSUI25/myportofolio_mobile), which logs in with a token.
 
 Live site: https://muhammad-reyhan53-myportofolio.pws.cs.ui.ac.id
 
-Built with Django 5.2, Django REST Framework 3.18, SQLite locally and PostgreSQL on PWS, WhiteNoise for static files, and plain JavaScript (Fetch API and the Popover API) on the page.
+Built with Django 5.2, Django REST Framework 3.18, django-cors-headers, SQLite locally and PostgreSQL on PWS, WhiteNoise for static files, and plain JavaScript (Fetch API and the Popover API) on the page.
 
 ## Setup
 
@@ -42,19 +42,28 @@ The group must be created once per database, so repeat these steps on the deploy
 | Action | Visitor | Regular user | Editor | Owner (superuser) |
 | --- | --- | --- | --- | --- |
 | Read the Education page and API | Yes | Yes | Yes | Yes |
-| Give or remove a star | Log in first (API: 403) | Yes | Yes | Yes |
-| Edit an entry (`PUT`/`PATCH`) | Log in first (API: 403) | 403 | Yes | Yes |
-| Create an entry (`POST`) | Log in first (API: 403) | 403 | 403 | Yes |
-| Delete an entry (`DELETE`) | Log in first (API: 403) | 403 | 403 | Yes |
+| Give or remove a star | Log in first (API: 401) | Yes | Yes | Yes |
+| Edit an entry (`PUT`/`PATCH`) | Log in first (API: 401) | 403 | Yes | Yes |
+| Create an entry (`POST`) | Log in first (API: 401) | 403 | 403 | Yes |
+| Delete an entry (`DELETE`) | Log in first (API: 401) | 403 | 403 | Yes |
 
 One set of Django model permissions (`main.add_education`, `main.change_education`, `main.delete_education`) drives all three layers: the HTML views, the API's `IsPortfolioOwnerOrEditorOrReadOnly` permission class, and the buttons the page draws. Superusers pass every permission check automatically, and the `Editor` group holds only `main.change_education`.
 
 ## REST API
 
-Base path: `/api/v1/`. Requests are authenticated by the site's login session, so log in through the site or the browsable API's "Log in" link. Every request that changes data must send the `X-CSRFToken` header; the Education page reads the token from the `csrftoken` cookie.
+Base path: `/api/v1/`. The API accepts two kinds of login, set as DRF's default authentication classes in `portofolio/settings.py`:
+
+- **Token** (`TokenAuthentication`), for the mobile app: `POST /api/v1/auth/token/` with a username and password returns a token, and every later request sends it in the `Authorization: Token <token>` header. Token requests don't need a CSRF token, because a browser never attaches this header on its own.
+- **Session** (`SessionAuthentication`), for the website: log in through the site or the browsable API's "Log in" link. Every request that changes data must send the `X-CSRFToken` header; the Education page reads the token from the `csrftoken` cookie.
+
+Token authentication is listed first, so a request that isn't logged in at all, or that sends an invalid or revoked token, gets 401 with a `WWW-Authenticate: Token` header. A logged-in user whose role can't make a change still gets 403.
+
+Outside production (`PRODUCTION` not set to `True`), `django-cors-headers` allows requests from any origin, so the Flutter app running in Chrome on its own `localhost` port can call the API, and `10.0.2.2` is added to `ALLOWED_HOSTS`, because that's the address the Android emulator uses to reach the computer running `runserver`. On PWS neither applies: no cross-origin requests are allowed, since the Android app doesn't need them.
 
 | Method | Endpoint | Allowed for | Success | Notes |
 | --- | --- | --- | --- | --- |
+| `POST` | `/api/v1/auth/token/` | Everyone | 200 | Body `{"username": "...", "password": "..."}`; returns `{"token": "..."}`, or 400 for wrong credentials |
+| `POST` | `/api/v1/auth/logout/` | Any logged-in user | 204 | Deletes the token sent in the `Authorization` header |
 | `GET` | `/api/v1/education/` | Everyone | 200 | `?institution=` filters by institution (case-insensitive, partial match) |
 | `POST` | `/api/v1/education/` | Owner | 201 | Returns the created entry |
 | `GET` | `/api/v1/education/<id>/` | Everyone | 200 | 404 if the entry doesn't exist |
@@ -63,7 +72,7 @@ Base path: `/api/v1/`. Requests are authenticated by the site's login session, s
 | `DELETE` | `/api/v1/education/<id>/` | Owner | 204 | Empty body |
 | `POST` | `/api/v1/education/<id>/star/` | Any logged-in user | 200 | Toggles your star and returns the entry |
 
-Invalid input returns 400 with errors per field, actions a role can't perform return 403, and missing entries return 404. For writes the role check runs first, so a role that can't make a change gets 403 whether or not the entry exists.
+Invalid input returns 400 with errors per field, requests that aren't logged in return 401, actions a role can't perform return 403, and missing entries return 404. For writes the role check runs first, so a role that can't make a change gets 401 or 403 whether or not the entry exists.
 
 Example entry:
 
@@ -91,7 +100,7 @@ Two older endpoints are kept so earlier assignments keep working, but the page n
 
 ## Running the Tests
 
-`python manage.py test main` runs 80 tests. `main/tests_api.py` covers the API for every role (rejected writes also check the database stayed unchanged), validation, CSRF with a real logged-in session, read-only fields, 404s and a query-count check. `main/tests.py` covers the HTML views, the page's role flags, the form, stars and the login redirect.
+`python manage.py test main` runs 90 tests. `main/tests_api.py` covers the API for every role (rejected writes also check the database stayed unchanged), validation, CSRF with a real logged-in session, read-only fields, 404s, a query-count check, and token authentication: logging in, creating with a token and no CSRF token, 401 for missing, invalid and revoked tokens, logging out, the CORS headers, and requests from the Android emulator's host. `main/tests.py` covers the HTML views, the page's role flags, the form, stars and the login redirect.
 
 ## Weekly Progress
 
@@ -104,6 +113,7 @@ Two older endpoints are kept so earlier assignments keep working, but the page n
 | Assignment 4 | Editor role via Django Group, server-side 403/redirect enforcement, POST-only star toggle with counts, JSON leak fix, login redirect back to the requested page, custom 403 page |
 | Assignment 5 | Education page loads via `fetch()` against a hand-built `JsonResponse`, debounced AJAX search, Popover add-education modal with a permission-checked AJAX create endpoint, toast notifications, XSS escaping plus server-side `strip_tags` cleaning, shared `static/js/ajax-utils.js` |
 | Assignment 6 | Django REST Framework API for Education under `/api/v1/` (built in Tutorial 7), page switched to the API, edit modal that saves only the changed fields with `PATCH` for the Editor and owner, inline and toast error messages, end-date and HTML-only validation shared by the form and serializer, page script moved to `static/js/education.js`, 80 tests |
+| Tutorial 10 | Token authentication for the mobile app (`rest_framework.authtoken`): token login and logout endpoints, `TokenAuthentication` as the first default authentication class with `SessionAuthentication` kept for the website, CORS for the Flutter app in Chrome and the Android emulator's `10.0.2.2` host allowed outside production, 10 more tests |
 
 ### Assignment 1
 
