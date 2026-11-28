@@ -19,4 +19,10 @@ urlpatterns = [
         api_views.education_star,
         name="education-star",
     ),
+    path("experience/", api_views.experience_list, name="experience-list"),
+    path(
+        "experience/<uuid:experience_id>/",
+        api_views.experience_detail,
+        name="experience-detail",
+    ),
 ]

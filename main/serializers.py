@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from main.models import Education
+from main.models import Education, Experience
 from main.validators import strip_html_required, validate_period
 
 
@@ -49,3 +49,27 @@ class EducationSerializer(serializers.ModelSerializer):
         if request is None or not request.user.is_authenticated:
             return False
         return any(user.pk == request.user.pk for user in obj.starred_by.all())
+
+
+class ExperienceSerializer(serializers.ModelSerializer):
+    is_ongoing = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = Experience
+        fields = [
+            "id",
+            "title",
+            "category",
+            "description",
+            "thumbnail",
+            "started_at",
+            "ended_at",
+            "is_ongoing",
+        ]
+        read_only_fields = ["id", "started_at"]
+
+    def validate_title(self, value):
+        return strip_html_required(value)
+
+    def validate_description(self, value):
+        return strip_html_required(value)
