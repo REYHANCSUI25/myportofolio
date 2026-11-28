@@ -8,7 +8,7 @@ Portfolio repo for PBP KKI, Odd Semester 2026/2027
 
 ## Overview
 
-A personal portfolio website built with Django as the individual project of Platform-Based Programming (CSGE602022), Fasilkom UI. The portfolio section is **Education**: a page that lists, searches, adds, edits, stars and deletes entries without reloading, backed by a Django REST Framework API at `/api/v1/education/`. Four roles (visitor, regular user, Editor, owner) decide what each person can change. The same API also serves my Flutter app, [MyPortfolio Mobile](https://github.com/REYHANCSUI25/myportofolio_mobile), which logs in with a token.
+A personal portfolio website built with Django as the individual project of Platform-Based Programming (CSGE602022), Fasilkom UI. The portfolio section is **Education**: a page that lists, searches, adds, edits, stars and deletes entries without reloading, backed by a Django REST Framework API at `/api/v1/education/`. Four roles (visitor, regular user, Editor, owner) decide what each person can change. Experience entries have their own page and an API at `/api/v1/experience/`. Both APIs also serve my Flutter app, [MyPortfolio Mobile](https://github.com/REYHANCSUI25/myportofolio_mobile), which logs in with a token, lists both sections, and adds and deletes experience entries.
 
 Live site: https://muhammad-reyhan53-myportofolio.pws.cs.ui.ac.id
 
@@ -46,8 +46,10 @@ The group must be created once per database, so repeat these steps on the deploy
 | Edit an entry (`PUT`/`PATCH`) | Log in first (API: 401) | 403 | Yes | Yes |
 | Create an entry (`POST`) | Log in first (API: 401) | 403 | 403 | Yes |
 | Delete an entry (`DELETE`) | Log in first (API: 401) | 403 | 403 | Yes |
+| Read the Experience page and API | Yes | Yes | Yes | Yes |
+| Add or delete an experience (API) | Log in first (API: 401) | 403 | 403 | Yes |
 
-One set of Django model permissions (`main.add_education`, `main.change_education`, `main.delete_education`) drives all three layers: the HTML views, the API's `IsPortfolioOwnerOrEditorOrReadOnly` permission class, and the buttons the page draws. Superusers pass every permission check automatically, and the `Editor` group holds only `main.change_education`.
+One set of Django model permissions (`main.add_education`, `main.change_education`, `main.delete_education`) drives all three layers: the HTML views, the API's `IsPortfolioOwnerOrEditorOrReadOnly` permission class, and the buttons the page draws. Superusers pass every permission check automatically, and the `Editor` group holds only `main.change_education`. The Experience API works the same way with `main.add_experience` and `main.delete_experience` through `IsPortfolioOwnerOrReadOnly`. Both classes extend `ModelPermissionOrReadOnly` in `main/permissions.py`, which maps `POST`, `PUT`, `PATCH` and `DELETE` to the model's add, change and delete permissions, so Education permissions never unlock Experience and the other way round.
 
 ## REST API
 
@@ -71,6 +73,10 @@ Outside production (`PRODUCTION` not set to `True`), `django-cors-headers` allow
 | `PATCH` | `/api/v1/education/<id>/` | Owner, Editor | 200 | Partial update: only the fields sent are changed |
 | `DELETE` | `/api/v1/education/<id>/` | Owner | 204 | Empty body |
 | `POST` | `/api/v1/education/<id>/star/` | Any logged-in user | 200 | Toggles your star and returns the entry |
+| `GET` | `/api/v1/experience/` | Everyone | 200 | Newest first |
+| `POST` | `/api/v1/experience/` | Owner | 201 | Returns the created entry |
+| `GET` | `/api/v1/experience/<id>/` | Everyone | 200 | 404 if the entry doesn't exist |
+| `DELETE` | `/api/v1/experience/<id>/` | Owner | 204 | Empty body; entries can't be edited through the API (405) |
 
 Invalid input returns 400 with errors per field, requests that aren't logged in return 401, actions a role can't perform return 403, and missing entries return 404. For writes the role check runs first, so a role that can't make a change gets 401 or 403 whether or not the entry exists.
 
@@ -90,17 +96,33 @@ Example entry:
 }
 ```
 
-Validation rules, shared by the API serializer and the HTML form through `main/validators.py`:
+Example experience entry:
+
+```json
+{
+    "id": "8b1e6f3a-2c4d-4e5f-9a7b-6c3d2e1f0a9b",
+    "title": "PBP Teaching Assistant",
+    "category": "part-time",
+    "description": "Help students understand web development.",
+    "thumbnail": null,
+    "started_at": "2026-11-27T05:59:42.395836Z",
+    "ended_at": null,
+    "is_ongoing": true
+}
+```
+
+Validation rules, shared by the API serializers and the HTML form through `main/validators.py`:
 
 - `institution`, `degree` and `description` can't be blank or made only of HTML tags; tags are stripped with `strip_tags` before saving.
 - `ended_at` can't be before `started_at`. A `PATCH` checks the new date against the stored one, and skips the check when it changes no dates.
 - `id`, `is_ongoing`, `star_count` and `is_starred` are read-only, and the API never exposes who starred an entry.
+- For experience entries, `title` and `description` follow the same blank and HTML rules, `category` must be one of the model's six values (such as `part-time`), `thumbnail` is an optional link of up to 200 characters, and `ended_at` is an optional ISO 8601 date and time. A time without a zone, such as `2025-06-30T00:00:00`, is read in the server's time zone (UTC). `id`, `started_at` (set when the entry is created) and `is_ongoing` are read-only.
 
 Two older endpoints are kept so earlier assignments keep working, but the page no longer uses them: `GET /api/education/` (the Tutorial 3–5 JSON) and `POST /education/add-ajax/` (Tutorial 5).
 
 ## Running the Tests
 
-`python manage.py test main` runs 90 tests. `main/tests_api.py` covers the API for every role (rejected writes also check the database stayed unchanged), validation, CSRF with a real logged-in session, read-only fields, 404s, a query-count check, and token authentication: logging in, creating with a token and no CSRF token, 401 for missing, invalid and revoked tokens, logging out, the CORS headers, and requests from the Android emulator's host. `main/tests.py` covers the HTML views, the page's role flags, the form, stars and the login redirect.
+`python manage.py test main` runs 102 tests. `main/tests_api.py` covers the API for every role (rejected writes also check the database stayed unchanged), validation, CSRF with a real logged-in session, read-only fields, 404s, a query-count check, and token authentication: logging in, creating with a token and no CSRF token, 401 for missing, invalid and revoked tokens, logging out, the CORS headers, and requests from the Android emulator's host. It also covers the Experience API: public reads, newest first, owner-only creating and deleting with a token, permissions that stay separate from Education's, defaults for the optional fields, read-only server fields, validation, HTML stripping, and the new entry showing up on the Experience page. `main/tests.py` covers the HTML views, the page's role flags, the form, stars and the login redirect.
 
 ## Weekly Progress
 
@@ -114,6 +136,7 @@ Two older endpoints are kept so earlier assignments keep working, but the page n
 | Assignment 5 | Education page loads via `fetch()` against a hand-built `JsonResponse`, debounced AJAX search, Popover add-education modal with a permission-checked AJAX create endpoint, toast notifications, XSS escaping plus server-side `strip_tags` cleaning, shared `static/js/ajax-utils.js` |
 | Assignment 6 | Django REST Framework API for Education under `/api/v1/` (built in Tutorial 7), page switched to the API, edit modal that saves only the changed fields with `PATCH` for the Editor and owner, inline and toast error messages, end-date and HTML-only validation shared by the form and serializer, page script moved to `static/js/education.js`, 80 tests |
 | Tutorial 10 | Token authentication for the mobile app (`rest_framework.authtoken`): token login and logout endpoints, `TokenAuthentication` as the first default authentication class with `SessionAuthentication` kept for the website, CORS for the Flutter app in Chrome and the Android emulator's `10.0.2.2` host allowed outside production, 10 more tests |
+| Assignment 9 | Experience REST API for the mobile app (`/api/v1/experience/`): public list and detail, owner-only create and delete with a token or a session, validation and HTML stripping for title and description, a shared `ModelPermissionOrReadOnly` base for both permission classes, 12 more tests. The app side and the reflective answers are in [MyPortfolio Mobile](https://github.com/REYHANCSUI25/myportofolio_mobile) |
 
 ### Assignment 1
 
