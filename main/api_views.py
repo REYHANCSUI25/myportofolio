@@ -4,9 +4,12 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from main.models import Education
-from main.permissions import IsPortfolioOwnerOrEditorOrReadOnly
-from main.serializers import EducationSerializer
+from main.models import Education, Experience
+from main.permissions import (
+    IsPortfolioOwnerOrEditorOrReadOnly,
+    IsPortfolioOwnerOrReadOnly,
+)
+from main.serializers import EducationSerializer, ExperienceSerializer
 
 
 def educations_with_stars():
@@ -67,6 +70,33 @@ def education_star(request, education_id):
         education.starred_by.add(request.user)
 
     serializer = EducationSerializer(education, context={"request": request})
+    return Response(serializer.data)
+
+
+@api_view(["GET", "HEAD", "POST"])
+@permission_classes([IsPortfolioOwnerOrReadOnly])
+def experience_list(request):
+    if request.method in ("GET", "HEAD"):
+        experiences = Experience.objects.order_by("-started_at")
+        serializer = ExperienceSerializer(experiences, many=True)
+        return Response(serializer.data)
+
+    serializer = ExperienceSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "HEAD", "DELETE"])
+@permission_classes([IsPortfolioOwnerOrReadOnly])
+def experience_detail(request, experience_id):
+    experience = get_object_or_404(Experience, pk=experience_id)
+
+    if request.method == "DELETE":
+        experience.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    serializer = ExperienceSerializer(experience)
     return Response(serializer.data)
 
 
