@@ -11,7 +11,7 @@ from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient, APITestCase
 
-from main.models import Education
+from main.models import Education, Experience
 from main.permissions import IsPortfolioOwnerOrEditorOrReadOnly
 
 
@@ -593,3 +593,211 @@ class TokenAuthAPITest(APITestCase):
         response = self.client.get(self.list_url, HTTP_HOST="10.0.2.2:8000")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+
+class ExperienceAPITest(APITestCase):
+    def setUp(self):
+        self.owner = User.objects.create_superuser(
+            username="owner", password="test-password", email="owner@example.com",
+        )
+        self.regular = User.objects.create_user(username="regular", password="test-password")
+        self.editor = User.objects.create_user(username="editor", password="test-password")
+        make_editor(self.editor)
+
+        self.experience = Experience.objects.create(
+            title="PBP Teaching Assistant",
+            description="Help students understand web development.",
+            category="part-time",
+        )
+        self.list_url = reverse("api:experience-list")
+        self.detail_url = reverse("api:experience-detail", args=[self.experience.id])
+        self.payload = {
+            "title": "Software Engineering Intern",
+            "category": "internship",
+            "description": "Built internal tools.",
+            "thumbnail": "https://example.com/intern.png",
+            "ended_at": "2025-06-30T00:00:00",
+        }
+
+    def use_token(self, user):
+        token, _ = Token.objects.get_or_create(user=user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+    def test_public_list_and_detail(self):
+        newer = Experience.objects.create(title="Volunteer Tutor", description="Taught kids.")
+
+        response = self.client.get(self.list_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [entry["id"] for entry in response.data],
+            [str(newer.id), str(self.experience.id)],
+        )
+        self.assertEqual(
+            set(response.data[1]),
+            {
+                "id",
+                "title",
+                "category",
+                "description",
+                "thumbnail",
+                "started_at",
+                "ended_at",
+                "is_ongoing",
+            },
+        )
+        self.assertEqual(response.data[1]["category"], "part-time")
+        self.assertIsNone(response.data[1]["thumbnail"])
+        self.assertTrue(response.data[1]["is_ongoing"])
+        detail = self.client.get(self.detail_url)
+        self.assertEqual(detail.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail.data["title"], "PBP Teaching Assistant")
+
+    def test_missing_experience_returns_404(self):
+        response = self.client.get(reverse("api:experience-detail", args=[uuid.uuid4()]))
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_visitor_regular_user_and_editor_cannot_create_or_delete(self):
+        for user, expected in ((None, 401), (self.regular, 403), (self.editor, 403)):
+            if user is None:
+                self.client.credentials()
+            else:
+                self.use_token(user)
+
+            created = self.client.post(self.list_url, self.payload, format="json")
+            deleted = self.client.delete(self.detail_url)
+
+            self.assertEqual(created.status_code, expected)
+            self.assertEqual(deleted.status_code, expected)
+        self.assertEqual(Experience.objects.count(), 1)
+
+    def test_experience_permissions_are_separate_from_education_permissions(self):
+        curator = User.objects.create_user(username="curator", password="test-password")
+        curator.user_permissions.add(
+            Permission.objects.get(codename="add_experience"),
+            Permission.objects.get(codename="delete_experience"),
+        )
+        self.use_token(curator)
+
+        created = self.client.post(self.list_url, self.payload, format="json")
+        deleted = self.client.delete(self.detail_url)
+        education = self.client.post(
+            reverse("api:education-list"),
+            {
+                "institution": "Universitas Indonesia",
+                "degree": "S1 Ilmu Komputer KKI",
+                "description": "Studying computer science.",
+                "started_at": "2025-08-01",
+            },
+            format="json",
+        )
+
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(deleted.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(education.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_owner_can_create_with_a_token_and_no_csrf_token(self):
+        client = APIClient(enforce_csrf_checks=True)
+        token, _ = Token.objects.get_or_create(user=self.owner)
+        client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+        response = client.post(self.list_url, self.payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["category"], "internship")
+        self.assertEqual(response.data["thumbnail"], "https://example.com/intern.png")
+        self.assertEqual(response.data["ended_at"], "2025-06-30T00:00:00Z")
+        self.assertFalse(response.data["is_ongoing"])
+        self.assertTrue(Experience.objects.filter(title="Software Engineering Intern").exists())
+
+    def test_created_experience_shows_on_the_experience_page(self):
+        self.use_token(self.owner)
+        self.client.post(self.list_url, self.payload, format="json")
+        self.client.credentials()
+
+        response = self.client.get(reverse("main:show_experience"))
+
+        self.assertContains(response, "Software Engineering Intern")
+
+    def test_optional_fields_can_be_left_out(self):
+        self.use_token(self.owner)
+
+        response = self.client.post(
+            self.list_url,
+            {"title": "Volunteer Tutor", "description": "Taught kids.", "thumbnail": None},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["category"], "full-time")
+        self.assertIsNone(response.data["thumbnail"])
+        self.assertIsNone(response.data["ended_at"])
+        self.assertTrue(response.data["is_ongoing"])
+
+    def test_server_fields_are_read_only(self):
+        self.use_token(self.owner)
+        payload = {
+            **self.payload,
+            "id": str(uuid.uuid4()),
+            "started_at": "2000-01-01T00:00:00Z",
+            "is_ongoing": True,
+        }
+
+        response = self.client.post(self.list_url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertNotEqual(response.data["id"], payload["id"])
+        self.assertFalse(response.data["started_at"].startswith("2000"))
+        self.assertFalse(response.data["is_ongoing"])
+
+    def test_validation_rejects_bad_input(self):
+        self.use_token(self.owner)
+
+        response = self.client.post(
+            self.list_url,
+            {
+                "title": "   ",
+                "category": "partTime",
+                "description": "<b></b>",
+                "thumbnail": "not a link",
+                "ended_at": "yesterday",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            set(response.data),
+            {"title", "category", "description", "thumbnail", "ended_at"},
+        )
+        self.assertEqual(response.data["category"], ['"partTime" is not a valid choice.'])
+        self.assertEqual(Experience.objects.count(), 1)
+
+    def test_html_is_stripped_before_saving(self):
+        self.use_token(self.owner)
+
+        response = self.client.post(
+            self.list_url,
+            {**self.payload, "title": "<i>Volunteer</i>", "description": "Taught <b>kids</b>."},
+            format="json",
+        )
+
+        self.assertEqual(response.data["title"], "Volunteer")
+        self.assertEqual(response.data["description"], "Taught kids.")
+
+    def test_owner_can_delete(self):
+        self.use_token(self.owner)
+
+        response = self.client.delete(self.detail_url)
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Experience.objects.exists())
+        self.assertEqual(self.client.delete(self.detail_url).status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_editing_is_not_supported(self):
+        self.use_token(self.owner)
+
+        response = self.client.patch(self.detail_url, {"title": "Changed"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
